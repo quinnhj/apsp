@@ -9,20 +9,20 @@ CC = g++
 OPENMP =
 CFLAGS = -O3
 LIBS =
-
+GPROF = -pg
 
 TARGETS = apsp
 
 all:	$(TARGETS)
 
 apsp: apsp.o common.o 
-	$(CC) -I$(BOOST_ROOT) -o $@ $(LIBS) $(OPENMP) apsp.o common.o
+	$(CC) $(GPROF) -I$(BOOST_ROOT) -o $@ $(LIBS) $(OPENMP) apsp.o common.o
 
 apsp.o: apsp.cpp common.h
-	$(CC) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) apsp.cpp
+	$(CC) $(GPROF) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) apsp.cpp
 
 common.o: common.cpp common.h
-	$(CC) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) common.cpp
+	$(CC) $(GPROF) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) common.cpp
 
 clean:
 	rm -f *.o $(TARGETS) *.stdout *.txt
