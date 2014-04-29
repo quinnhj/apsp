@@ -25,20 +25,6 @@ double read_timer( )
     return (end.tv_sec - start.tv_sec) + 1.0e-6 * (end.tv_usec - start.tv_usec);
 }
 
-//
-//  I/O routines
-//
-void save( FILE *f, int n, particle_t *p )
-{
-    static bool first = true;
-    if( first )
-    {
-        fprintf( f, "%d %g\n", n, size );
-        first = false;
-    }
-    for( int i = 0; i < n; i++ )
-        fprintf( f, "%g %g\n", p[i].x, p[i].y );
-}
 
 //
 //  command line option processing

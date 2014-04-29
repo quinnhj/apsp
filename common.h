@@ -4,6 +4,18 @@
 inline int min( int a, int b ) { return a < b ? a : b; }
 inline int max( int a, int b ) { return a > b ? a : b; }
 
+typedef struct {
+    int u;
+    int v;
+    float dist;
+} vert_pair;
+
+struct vert_comparator {
+    bool operator() (const vert_pair & l, const vert_pair & r) const {
+        return l.dist > r.dist;
+    }
+};
+
 //
 //  saving parameters
 //
@@ -21,12 +33,6 @@ const int PER_BIN = 10;
 //  timing routines
 //
 double read_timer( );
-
-//
-//  I/O routines
-//
-FILE *open_save( char *filename, int n );
-void save( FILE *f, int n, particle_t *p );
 
 //
 //  argument processing routines

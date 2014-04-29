@@ -1,3 +1,8 @@
+# 
+# This relies on installation of the Boost library. In particular, we use the
+# Fibonacci Heap data structure. Set BOOST_ROOT to point to the root of your
+# Boost library install as an environment variable, otherwise it won't compile.
+#
 
 CC = g++
 #OPENMP = -fopenmp
@@ -11,13 +16,13 @@ TARGETS = apsp
 all:	$(TARGETS)
 
 apsp: apsp.o common.o 
-	$(CC) -o $@ $(LIBS) $(OPENMP) apsp.o common.o
+	$(CC) -I$(BOOST_ROOT) -o $@ $(LIBS) $(OPENMP) apsp.o common.o
 
 apsp.o: apsp.cpp common.h
-	$(CC) -c $(OPENMP) $(CFLAGS) apsp.cpp
+	$(CC) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) apsp.cpp
 
 common.o: common.cpp common.h
-	$(CC) -c $(OPENMP) $(CFLAGS) common.cpp
+	$(CC) -I$(BOOST_ROOT) -c $(OPENMP) $(CFLAGS) common.cpp
 
 clean:
 	rm -f *.o $(TARGETS) *.stdout *.txt
