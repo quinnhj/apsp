@@ -50,9 +50,14 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
         }
     }
     
+    /* 
+     * Uncomment this if you want distance to self to be 0.
+     * Otherwise it finds the shortest path out and back to itself. 
+     *
     for (int i = 0; i < n; i++) {
         dist[i*n + i] = 0.0;
     }
+    */
 
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -217,7 +222,7 @@ int main( int argc, char **argv )
     //Validating output against Floyd Warshall
     if( find_option( argc, argv, "-no" ) == -1 ) {
         for (int i = 0; i < n*n; i++) {
-            if (abs(di_dist[i] - fw_dist[i]) > 0.0001) {
+            if ((di_dist[i] - fw_dist[i] > 0.0001) || (fw_dist[i] - di_dist[i] > 0.0001) ) {
                 printf("\n\nFAILURE at %d\n\n", i);
                 break;
             }
