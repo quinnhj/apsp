@@ -38,7 +38,7 @@ void floyd_warshall(int n, int* par, float* dist) {
 }
 
 void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
-             std::list<int>* L, std::list<int>* R,
+             std::vector<int>* L, std::vector<int>* R,
              fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     
     for (int i = 0; i < n; i++) {
@@ -78,7 +78,7 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
 }
 
 void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair* q_arr, 
-                int* p, int* q, std::list<int>* L, std::list<int>* R,
+                int* p, int* q, std::vector<int>* L, std::vector<int>* R,
                 fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     if (dist[u*n + v] + dist[v*n + w] < dist[u*n + w]) {
         dist[u*n + w] = dist[u*n + v] + dist[v*n + w];
@@ -100,7 +100,7 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
 }
 
 void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr, 
-             int* p, int* q, std::list<int>* L, std::list<int>* R,
+             int* p, int* q, std::vector<int>* L, std::vector<int>* R,
              fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     
     di_init(n, dist, graph, q_arr, p, q, L, R, handles);
@@ -114,21 +114,22 @@ void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr,
         fib_heap.pop();
         L[p[u*n + v]*n + v].push_back(u);
         R[u*n + q[u*n + v]].push_back(v);
-        for (std::list<int>::iterator li = L[u*n + q[u*n + v]].begin();
-                li != L[u*n + q[u*n + v]].end(); li++) {
-            
-            di_examine(n, *li, u, v, dist, graph, q_arr, 
+
+        for (std::vector<int>::size_type i = 0;
+                i != L[u*n + q[u*n + v]].size(); i++) {
+
+            di_examine(n, L[u*n + q[u*n + v]][i], u, v, dist, graph, q_arr, 
                 p, q, L, R, handles);
-            
+
+        }
+      
+        for (std::vector<int>::size_type i = 0; i != R[p[u*n + v]*n + v].size(); i++) {
+
+            di_examine(n, u, v, R[p[u*n + v]*n + v][i], dist, graph, q_arr, 
+                p, q, L, R, handles);
+
         }
 
-        for (std::list<int>::iterator li = R[p[u*n + v]*n + v].begin();
-                li != R[p[u*n + v]*n + v].end(); li++) {
-            
-            di_examine(n, u, v, *li, dist, graph, q_arr, 
-                p, q, L, R, handles);
-            
-        }
     }
 }
 
@@ -194,8 +195,8 @@ int main( int argc, char **argv )
     vert_pair *q_arr = (vert_pair*) malloc (n * n * sizeof(vert_pair));
     int *p = (int*) malloc(n * n * sizeof(int));
     int *q = (int*) malloc(n * n * sizeof(int));
-    std::list<int> *L = new std::list<int>[n*n];
-    std::list<int> *R = new std::list<int>[n*n];
+    std::vector<int> *L = new std::vector<int>[n*n];
+    std::vector<int> *R = new std::vector<int>[n*n];
     fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type *handles = 
             new fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type[n*n];
 
