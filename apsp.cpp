@@ -5,11 +5,14 @@
 #include "common.h"
 #include "omp.h"
 #include <boost/heap/fibonacci_heap.hpp>
+#include <boost/heap/binomial_heap.hpp>
+
+#define HEAP fibonacci_heap
 
 using namespace boost::heap;
 const float INF = 100000.0;
 //Note, reversed comparator, so call "increase" when decreasing key.
-fibonacci_heap<vert_pair, compare<vert_comparator> > fib_heap;
+HEAP<vert_pair, compare<vert_comparator> > heap;
 
 void floyd_warshall(int n, int* par, float* dist) {
     for (int i = 0; i < n; i++) {
@@ -39,7 +42,7 @@ void floyd_warshall(int n, int* par, float* dist) {
 
 void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
              std::vector<int>* L, std::vector<int>* R,
-             fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+             HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -71,7 +74,7 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
                 vert.u = i;
                 vert.v = j;
                 vert.dist = graph[i*n + j];
-                handles[i*n + j] = fib_heap.push(vert);
+                handles[i*n + j] = heap.push(vert);
             }
         }
     }
@@ -79,7 +82,7 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
 
 void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair* q_arr, 
                 int* p, int* q, std::vector<int>* L, std::vector<int>* R,
-                fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+                HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     if (dist[u*n + v] + dist[v*n + w] < dist[u*n + w]) {
         dist[u*n + w] = dist[u*n + v] + dist[v*n + w];
         
@@ -89,9 +92,9 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
         vert.dist = dist[u*n + w];
             
         if (p[u*n + w] == -1) {    
-            handles[u*n + w] = fib_heap.push(vert);
+            handles[u*n + w] = heap.push(vert);
         } else {
-            fib_heap.increase(handles[u*n + w], vert);
+            heap.increase(handles[u*n + w], vert);
         }
 
         p[u*n + w] = p[u*n + v];
@@ -99,37 +102,48 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
     }
 }
 
+
+void di_lists(int n, int u, int v, float* dist, float* graph, vert_pair* q_arr, 
+                int* p, int* q, std::vector<int>* L, std::vector<int>* R,
+                HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+
+    int lidx = u*n + q[u*n + v];
+    int ridx = p[u*n + v]*n + v;
+    std::vector<int>::size_type i = 0;
+
+    for (i = 0; i != L[lidx].size(); i++) {
+
+        di_examine(n, L[lidx][i], u, v, dist, graph, q_arr, 
+            p, q, L, R, handles);
+
+    }
+  
+    for (i = 0; i != R[ridx].size(); i++) {
+
+        di_examine(n, u, v, R[ridx][i], dist, graph, q_arr, 
+            p, q, L, R, handles);
+
+    }
+}
+
 void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr, 
              int* p, int* q, std::vector<int>* L, std::vector<int>* R,
-             fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+             HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
     
     di_init(n, dist, graph, q_arr, p, q, L, R, handles);
     int u, v;
     //Main loop
-    while (!fib_heap.empty()) {
-        vert_pair vert = fib_heap.top();
+    while (!heap.empty()) {
+        vert_pair vert = heap.top();
         u = vert.u;
         v = vert.v;
         //Has to happen AFTER setting u and v, or there will be a segfault
-        fib_heap.pop();
+        heap.pop();
         L[p[u*n + v]*n + v].push_back(u);
         R[u*n + q[u*n + v]].push_back(v);
 
-        for (std::vector<int>::size_type i = 0;
-                i != L[u*n + q[u*n + v]].size(); i++) {
-
-            di_examine(n, L[u*n + q[u*n + v]][i], u, v, dist, graph, q_arr, 
-                p, q, L, R, handles);
-
-        }
-      
-        for (std::vector<int>::size_type i = 0; i != R[p[u*n + v]*n + v].size(); i++) {
-
-            di_examine(n, u, v, R[p[u*n + v]*n + v][i], dist, graph, q_arr, 
-                p, q, L, R, handles);
-
-        }
-
+        di_lists(n, u, v, dist, graph, q_arr, 
+            p, q, L, R, handles);
     }
 }
 
@@ -147,7 +161,8 @@ int main( int argc, char **argv )
         printf( "Options:\n" );
         printf( "-h to see this help\n" );
         printf( "-n <int> to set the number of vertices\n" );
-        printf( "-no turns off all correctness checks and particle output\n");
+        printf( "-no turns off all correctness checks\n");
+        printf( "-csv outputs in csv format (n, floyd_time, di_time)\n");
         return 0;
     }
     
@@ -162,7 +177,7 @@ int main( int argc, char **argv )
     float *graph = (float*) malloc( n * n * sizeof(float));
     
     // Initialize every edge to have a weight between 0 and 1.
-    srand48(5);
+    srand48(1337);
     for (int i = 0; i < n * n; i++) {
         //no edge between an edge and itself.
         if (i%n == i/n) {
@@ -197,8 +212,8 @@ int main( int argc, char **argv )
     int *q = (int*) malloc(n * n * sizeof(int));
     std::vector<int> *L = new std::vector<int>[n*n];
     std::vector<int> *R = new std::vector<int>[n*n];
-    fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type *handles = 
-            new fibonacci_heap<vert_pair, compare<vert_comparator> >::handle_type[n*n];
+    HEAP<vert_pair, compare<vert_comparator> >::handle_type *handles = 
+            new HEAP<vert_pair, compare<vert_comparator> >::handle_type[n*n];
 
     //Initialize arrays
     for (int i = 0; i < n*n; i++) {
@@ -272,9 +287,14 @@ int main( int argc, char **argv )
     }
 
     //Printing out times
-    printf("\nTimes:\n");
-    printf("Floyd Warshall: %f\n", floyd_time);
-    printf("Demetrescu Italiano: %f\n", di_time);
+
+    if( find_option( argc, argv, "-csv" ) == -1 ) {
+        printf("\nTimes:\n");
+        printf("Floyd Warshall: %f\n", floyd_time);
+        printf("Demetrescu Italiano: %f\n", di_time);
+    } else {
+        printf("%d\t%f\t%f\n", n, floyd_time, di_time);
+    }
 
     // Freeing memory
     free(graph);
