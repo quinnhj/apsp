@@ -6,6 +6,9 @@
 #include "omp.h"
 #include <boost/heap/fibonacci_heap.hpp>
 #include <boost/heap/binomial_heap.hpp>
+#include <iostream>
+#include <iterator>
+#include <algorithm>
 
 #define HEAP fibonacci_heap
 #define BUCKET
@@ -51,24 +54,12 @@ void floyd_warshall(int n, int* par, float* dist) {
 void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
     int idx = (int)(val/min_edge);
-    //printf("val: %f\t min: %f\t idx:%d\n", val, min_edge, idx);
     idx = min(idx, n*n);
-    //printf("val: %f\t min: %f\t idx:%d\n", val, min_edge, idx);
 
     bucket_heap[idx].push_back(pair);
     add_count++;
     b_num[pair] = idx;
 
-    if (pair == 117) {
-        printf("Inserting 117 at idx %d\n", idx);
-    }
-
-    if (idx < last_bucket) {
-        printf("ADDING BELOW MIN. pair = %d\tidx = %d\tlast_bucket = %d\t\n", pair, idx, last_bucket);
-    }
-    if (bucket_heap[idx].size() < 1) {
-        printf("SIZE OF ZERO\n");
-    }
     std::list<int>::iterator iter = bucket_heap[idx].end();
     iter--;
     iters[pair] = iter;
@@ -77,47 +68,39 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
 
 void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
+    
     int orig_idx = b_num[pair];
-    if (pair == 117) {
-        printf("Attempting to delete 117 at idx %d\n", orig_idx);
-    }
-    std::list<int> list = bucket_heap[orig_idx];
-    bool failed_to_remove = false;
     //Naive O(N) removal of item from linked list. Slow as hell.
-    if (list.end() == std::find(list.begin(), list.end(), pair)) {
-        printf("Removing invalid item. pair = %d\tidx = %d\tlast_bucket = %d\t\n", pair, orig_idx, last_bucket);
-        rem_count--;
-        failed_to_remove = true;
-    }
-    list.remove(pair);
+    
+    bucket_heap[orig_idx].remove(pair);
     rem_count++;
+    
     //What we should do, but it's not that simple :/
     /*
     std::list<int>::iterator iter = list.end();
     iter--;
     list.erase(iters[pair]);
     */
-    if (!failed_to_remove) {
-        heap_insert(bucket_heap, b_num, pair, val, n, iters);
-    }
+
+    heap_insert(bucket_heap, b_num, pair, val, n, iters);
 }
 
 
 int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
         std::list<int>::iterator* iters) {
     int ret_val;
+    int list_size;
     for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
-        if (bucket_heap[i].size() > 0) {
+        list_size = (int)bucket_heap[i].size();
+        if (list_size > 0) {
             if (i < n*n) {
-                int size_before = bucket_heap[i].size();
+                
                 ret_val = bucket_heap[i].front();
                 //printf("Retval: %d\n", ret_val);
                 bucket_heap[i].pop_front();
-                if (size_before != bucket_heap[i].size() + 1){
-                    printf("Bad Pop\n");
-                }
                 rem_count++;
                 return ret_val;
+            
             } else {
                 //This should be implemented using a real heap as per the paper.
                 // For now enforcing that this scenario can't happen by limiting
