@@ -4,23 +4,18 @@
 #include <math.h>
 #include "common.h"
 #include "omp.h"
-#include <boost/heap/fibonacci_heap.hpp>
-#include <boost/heap/binomial_heap.hpp>
-#include <iostream>
-#include <iterator>
-#include <algorithm>
+#include <list>
+#include <vector>
 
-#define HEAP fibonacci_heap
-#define BUCKET
-
-using namespace boost::heap;
+// Globals for convenience.
 const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
-bool empty = false;
-//Note, reversed comparator, so call "increase" when decreasing key.
-HEAP<vert_pair, compare<vert_comparator> > heap;
 
+/*
+ * Reference Implementation of Floyd Warshall.
+ * It is used for correctness checking, as well as sanity check on performance
+ */
 void floyd_warshall(int n, int* par, float* dist) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -47,73 +42,94 @@ void floyd_warshall(int n, int* par, float* dist) {
 
 }
 
+/*
+ * Inserts into our bucket based heap.
+ * It doesn't maintain a true heap, but a coarsely grained heap with
+ * buckets of size 1/n*n. 
+ */
 void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
+    
+    // Figure out which bucket to insert into
     int idx = (int)(val/min_edge);
     idx = min(idx, n*n);
 
+    // Add to bucket
     bucket_heap[idx].push_back(pair);
-    b_num[pair] = idx;
-
+    
+    // Update bookkeeping so that we can decrement this in constant time.
+    b_num[pair] = idx; // array storing bucket numbers
     std::list<int>::iterator iter = bucket_heap[idx].end();
     iter--;
-    iters[pair] = iter;
+    iters[pair] = iter; // pointer to position in said bucket
 }
 
-
+/*
+ * Decrease the value of a key in our heap.
+ * We simply delete it from its relevant bucket, then call
+ * heap_insert to insert it with a new value.
+ */
 void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
     
-    int orig_idx = b_num[pair];
-    //Naive O(N) removal of item from linked list. Slow as hell.
+    // Deleting 'pair' from its bucket.
+    bucket_heap[b_num[pair]].erase(iters[pair]);
     
-    
-    //bucket_heap[orig_idx].remove(pair);
-    bucket_heap[orig_idx].erase(iters[pair]);
-    
-
+    // Inserting it into heap with a new value.
     heap_insert(bucket_heap, b_num, pair, val, n, iters);
 }
 
-
+/*
+ * Attempt to extract minimum value from the heap.
+ * It returns -1 as failure, signifying an empty heap.
+ */
 int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
         std::list<int>::iterator* iters) {
+
     int ret_val;
-    int list_size;
+
+    // Walk through each bucket in order. The initializing/incrementing
+    // with last_bucket ensures that we only ever see each index once.
     for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
-        list_size = (int)bucket_heap[i].size();
-        if (list_size > 0) {
+        if (bucket_heap[i].size() > 0) {
+            // If it's a normal bucket
             if (i < n*n) {
                 
+                // Remove an item from the bucket and return it.
                 ret_val = bucket_heap[i].front();
-                //printf("Retval: %d\n", ret_val);
                 bucket_heap[i].pop_front();
                 return ret_val;
-            
+
+            // Else it's the overflow bucket, which is handled using a fib heap.
             } else {
-                //This should be implemented using a real heap as per the paper.
+                // This should be implemented using a fib heap as per the paper.
                 // For now enforcing that this scenario can't happen by limiting
                 // the minimum edge value.
                 return -1;
             }
         }
     }
+
+    // Return -1 if the heap is empty
     return -1;
 }
 
-void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
+/*
+ * Initializer function for the DI APSP algorithm.
+ */
+void di_init(int n, float* dist, float* graph, int* p, int* q,
              std::vector<int>* L, std::vector<int>* R,
              std::list<int>* bucket_heap, int* b_num,
-             std::list<int>::iterator* iters,
-             HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+             std::list<int>::iterator* iters) {
     
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            dist[i*n + j] = INF;
-            p[i*n + j] = -1;
-            q[i*n + j] = -1;
-            //L and R are already initialized
-        }
+    // For every pair of vertices
+    for (int i = 0; i < n*n; i++) {
+        dist[i] = INF;
+
+        // Because these are always set to positive ints, this is our null
+        p[i] = -1;
+        q[i] = -1;
+        //L and R are already initialized
     }
     
     /* 
@@ -125,6 +141,7 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
     }
     */
 
+    // For every edge that exists in the graph.
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (graph[i*n + j] != INF) {
@@ -133,46 +150,29 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
                 p[i*n + j] = j;
                 q[i*n + j] = i;
 
-                vert_pair vert = q_arr[i*n + j];
-                vert.u = i;
-                vert.v = j;
-                vert.dist = graph[i*n + j];
-                
-                #ifdef BUCKET
                 heap_insert(bucket_heap, b_num, i*n + j, graph[i*n + j], n, iters);
-                #else
-                handles[i*n + j] = heap.push(vert);
-                #endif
             }
         }
     }
 }
 
-void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair* q_arr, 
+/*
+ * Function that examines for an opportunity to discover a new shortest path
+ * from u to v, using w.
+ */
+void di_examine(int n, int u, int v, int w, float* dist, float* graph, 
                 int* p, int* q, std::vector<int>* L, std::vector<int>* R,
                 std::list<int>* bucket_heap, int* b_num,
-                std::list<int>::iterator* iters,
-                HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+                std::list<int>::iterator* iters) {
+    
     if (dist[u*n + v] + dist[v*n + w] < dist[u*n + w]) {
         dist[u*n + w] = dist[u*n + v] + dist[v*n + w];
         
-        vert_pair vert = q_arr[u*n + w];
-        vert.u = u;
-        vert.v = w;
-        vert.dist = dist[u*n + w];
-            
+        // If it's never been inserted, insert, else decrease.
         if (p[u*n + w] == -1) {    
-            #ifdef BUCKET
             heap_insert(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
-            #else
-            handles[u*n + w] = heap.push(vert);
-            #endif
         } else {
-            #ifdef BUCKET
             heap_decrease(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
-            #else
-            heap.increase(handles[u*n + w], vert);
-            #endif
         }
 
         p[u*n + w] = p[u*n + v];
@@ -180,12 +180,14 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
     }
 }
 
+/*
+ * Function that examines across the L and R lists.
+ */
 
-void di_lists(int n, int u, int v, float* dist, float* graph, vert_pair* q_arr, 
+void di_lists(int n, int u, int v, float* dist, float* graph,
                 int* p, int* q, std::vector<int>* L, std::vector<int>* R,
                 std::list<int>* bucket_heap, int* b_num,
-                std::list<int>::iterator* iters,
-                HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+                std::list<int>::iterator* iters) {
 
     int lidx = u*n + q[u*n + v];
     int ridx = p[u*n + v]*n + v;
@@ -193,52 +195,48 @@ void di_lists(int n, int u, int v, float* dist, float* graph, vert_pair* q_arr,
 
     for (i = 0; i != L[lidx].size(); i++) {
 
-        di_examine(n, L[lidx][i], u, v, dist, graph, q_arr, 
-            p, q, L, R, bucket_heap, b_num, iters, handles);
+        di_examine(n, L[lidx][i], u, v, dist, graph,
+            p, q, L, R, bucket_heap, b_num, iters);
 
     }
   
     for (i = 0; i != R[ridx].size(); i++) {
 
-        di_examine(n, u, v, R[ridx][i], dist, graph, q_arr, 
-            p, q, L, R, bucket_heap, b_num, iters, handles);
+        di_examine(n, u, v, R[ridx][i], dist, graph,
+            p, q, L, R, bucket_heap, b_num, iters);
 
     }
 }
 
-void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr, 
+/*
+ * Primary function for DI APSP.
+ */
+void di_apsp(int n, float* dist, float* graph,
              int* p, int* q, std::vector<int>* L, std::vector<int>* R,
              std::list<int>* bucket_heap, int* b_num,
-             std::list<int>::iterator* iters,
-             HEAP<vert_pair, compare<vert_comparator> >::handle_type* handles) {
+             std::list<int>::iterator* iters) {
     
-    di_init(n, dist, graph, q_arr, p, q, L, R, bucket_heap, b_num, iters, handles);
+    // Initialize
+    di_init(n, dist, graph, p, q, L, R, bucket_heap, b_num, iters);
     int u, v, pair;
-    //Main loop
-    #ifdef BUCKET
-    while (1) {
-    #else
-    while (!heap.empty()) {
-    #endif
 
-        #ifdef BUCKET
+    //Main loop
+    while (1) {
+
+        // Get min (u,v) pair from the heap.
+        // Break the loop if heap was empty.
         pair = heap_extract(bucket_heap, b_num, n, iters);
         if (pair < 0) break;
         u = pair/n;
         v = pair%n;
-        #else
-        vert_pair vert = heap.top();
-        u = vert.u;
-        v = vert.v;
-        //Has to happen AFTER setting u and v, or there will be a segfault
-        heap.pop();
-        #endif
        
+        // Add to relevant lists
         L[p[u*n + v]*n + v].push_back(u);
         R[u*n + q[u*n + v]].push_back(v);
 
-        di_lists(n, u, v, dist, graph, q_arr, 
-            p, q, L, R, bucket_heap, b_num, iters, handles);
+        // Examine through the lists.
+        di_lists(n, u, v, dist, graph, 
+            p, q, L, R, bucket_heap, b_num, iters);
     }
 }
 
@@ -248,9 +246,9 @@ int main( int argc, char **argv )
     //Declaring variables
     double floyd_time, di_time;
 
-    //
-    // Handling user input.
-    //
+    /*
+     *Handling user input.
+     */
     if( find_option( argc, argv, "-h" ) >= 0 )
     {
         printf( "Options:\n" );
@@ -259,21 +257,65 @@ int main( int argc, char **argv )
         printf( "-no turns off all correctness checks\n");
         printf( "-csv outputs in csv format (n, floyd_time, di_time)\n");
         return 0;
-    }
-    
+    } 
     int n = read_int( argc, argv, "-n", 100 );
 
-    //
-    // Setting up the data structures
-    //
+    /*
+     * Setting up the data structures
+     * All data structures are assumed to be row major.
+     */
 
     // An n*n matrix, where the element in the ith row and jth column
     // represents the weight of the edge from vertex i to j.
     float *graph = (float*) malloc( n * n * sizeof(float));
     
-    // Initialize every edge to have a weight between 0 and 1.
+    // An n*n matrix, where the element in the ith row and jth column
+    // represents the second vertex on the shortest path from u -> v
+    int *p = (int*) malloc(n * n * sizeof(int));
+
+    // An n*n matrix, where the element in the ith row and jth column
+    // represents the penultimate vertex on the shortest path from u -> v
+    int *q = (int*) malloc(n * n * sizeof(int));
+
+    // An n*n matrix, where the element in the ith row and jth column
+    // is a list of vertices w for which w -> u -Shortest-Path-> v
+    // is known to be a shortest path
+    std::vector<int> *L = new std::vector<int>[n*n];
+    
+    // An n*n matrix, where the element in the ith row and jth column
+    // is a list of vertices w for which u -Shortest-Path-> v -> w
+    // is known to be a shortest path
+    std::vector<int> *R = new std::vector<int>[n*n];
+
+    // An n*n+1 matrix, where each element holds a list of vertex pairs.
+    // This is the core data structure for our bucket based heap.
+    std::list<int> *bucket_heap = new std::list<int>[n*n + 1];
+
+    // An n*n matrix, where the element in the ith row and jth column
+    // is the iterator/pointer to the linked list element holding
+    // the vertex pair (i,j) in bucket_heap.
+    std::list<int>::iterator *iters = new std::list<int>::iterator[n*n];
+    
+    // An n*n matrix, where the element in the ith row and jth column
+    // is the index of the bucket that holds the vertex pair (i,j) in bucket_heap.
+    int *b_num = (int*) malloc(n * n * sizeof(int));
+    
+    // Parent and dist arrays for floyd warshall
+    float *fw_dist = (float*) malloc( n * n * sizeof(float));
+    int *fw_par = (int*) malloc( n * n * sizeof(int));
+
+    // Dist array for DI
+    float *di_dist = (float*) malloc( n * n * sizeof(float));
+ 
+    /*
+     * Initializing values.
+     */
+
     srand48(1337);
+    // We set a minimum value to avoid the overflow bucket scenario.
     float min_allowable_value = (1.0/(n*n));
+    
+    // Initialize every edge to have a weight between min_allowable_value  and 1.
     for (int i = 0; i < n * n; i++) {
         float temp;
         //no edge between an edge and itself.
@@ -286,61 +328,35 @@ int main( int argc, char **argv )
             graph[i] = temp;
         }
     }
-    //Print for viewing if small enough
-    if (n < 10) {
-        printf("\n---Our Graph---\n");
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                printf("%.4f\t", graph[i*n + j]);
-            }
-            printf("\n");
-        }
-        printf("\n");
-    }
-    
-    // Parent and dist arrays for floyd warshall
-    float *fw_dist = (float*) malloc( n * n * sizeof(float));
-    int *fw_par = (int*) malloc( n * n * sizeof(int));
-
-    // Parent and dist arrays for DI
-    float *di_dist = (float*) malloc( n * n * sizeof(float));
-    int *di_par = (int*) malloc( n * n * sizeof(int));
    
-    // Other arrays for DI
-    vert_pair *q_arr = (vert_pair*) malloc (n * n * sizeof(vert_pair));
-    int *p = (int*) malloc(n * n * sizeof(int));
-    int *q = (int*) malloc(n * n * sizeof(int));
-    std::vector<int> *L = new std::vector<int>[n*n];
-    std::vector<int> *R = new std::vector<int>[n*n];
-    HEAP<vert_pair, compare<vert_comparator> >::handle_type *handles = 
-            new HEAP<vert_pair, compare<vert_comparator> >::handle_type[n*n];
-    std::list<int> *bucket_heap = new std::list<int>[n*n + 1];
-    std::list<int>::iterator *iters = new std::list<int>::iterator[n*n];
-    int *b_num = (int*) malloc(n * n * sizeof(int));
-
-    //Initialize arrays
+    //Initialize dist arrays.
     for (int i = 0; i < n*n; i++) {
         fw_dist[i] = graph[i];
         di_dist[i] = graph[i];
         b_num[i] = 0;
     }
 
-    //
-    // Here we do the fast alg
-    //
+    /*
+     * Executing and timing algorithms
+     */
     
+    // Running Demetrescu Italiano.
     di_time = read_timer();
-    di_apsp(n, di_dist, graph, q_arr, 
-            p, q, L, R, bucket_heap, b_num, iters, handles);
+    di_apsp(n, di_dist, graph, p, q, L, R, bucket_heap, b_num, iters);
     di_time = read_timer() - di_time;
 
-    //Running Floyd Warshall for standard.
+    //Running Floyd Warshall as a standard implementation.
     floyd_time = read_timer();
     floyd_warshall(n, fw_par, fw_dist);
     floyd_time = read_timer() - floyd_time;
 
-    //Validating output against Floyd Warshall
+    /*
+     * Validating DI results against reference Floyd Warshall
+     */
+
     if( find_option( argc, argv, "-no" ) == -1 ) {
+        
+        //Report a failure if anything varies by more than 0.0001
         for (int i = 0; i < n*n; i++) {
             if ((di_dist[i] - fw_dist[i] > 0.0001) || (fw_dist[i] - di_dist[i] > 0.0001) ) {
                 printf("\n\nFAILURE at %d\n\n", i);
@@ -348,8 +364,18 @@ int main( int argc, char **argv )
             }
         }
 
-        //Printing Floyd Warshall Results if Short Enough
+        //Print out matrices if n is small enough.
         if (n < 10) {
+
+            printf("\n---Our Graph---\n");
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    printf("%.4f\t", graph[i*n + j]);
+                }
+                printf("\n");
+            }
+            printf("\n");
+     
             printf("\n---Floyd Warshall Dist---\n");
             for (int i = 0; i < n; i++) {
                 for (int j = 0; j < n; j++) {
@@ -366,10 +392,7 @@ int main( int argc, char **argv )
                 printf("\n");
             }
             printf("\n");
-        }
 
-        //Printing DI Results if Short Enough
-        if (n < 10) {
             printf("\n---Demetrescu Italiano Dist---\n");
             for (int i = 0; i < n; i++) {
                 for (int j = 0; j < n; j++) {
@@ -378,19 +401,14 @@ int main( int argc, char **argv )
                 printf("\n");
             }
             printf("\n");
-            printf("\n---Demetrescu Italiano Par---\n");
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    printf("%d\t", di_par[i*n + j]);
-                }
-                printf("\n");
-            }
-            printf("\n");
         }
 
     }
 
-    //Printing out times
+    /*
+     * Print out results
+     */
+
     if( find_option( argc, argv, "-csv" ) == -1 ) {
         printf("\nTimes:\n");
         printf("Floyd Warshall: %f\n", floyd_time);
@@ -399,13 +417,14 @@ int main( int argc, char **argv )
         printf("%d\t%f\t%f\n", n, floyd_time, di_time);
     }
 
-    // Freeing memory
+    /*
+     * Free up manually allocated memory.
+     */
+
     free(graph);
     free(fw_dist);
     free(fw_par);
     free(di_dist);
-    free(di_par);
-    free(q_arr);
     free(p);
     free(q);
     free(b_num);
