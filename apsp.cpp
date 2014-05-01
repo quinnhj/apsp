@@ -18,10 +18,6 @@ const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
 bool empty = false;
-int add_count = 0;
-int rem_count = 0;
-int dec_count = 0;
-int loop_count = 0;
 //Note, reversed comparator, so call "increase" when decreasing key.
 HEAP<vert_pair, compare<vert_comparator> > heap;
 
@@ -57,7 +53,6 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
     idx = min(idx, n*n);
 
     bucket_heap[idx].push_back(pair);
-    add_count++;
     b_num[pair] = idx;
 
     std::list<int>::iterator iter = bucket_heap[idx].end();
@@ -72,15 +67,10 @@ void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val,
     int orig_idx = b_num[pair];
     //Naive O(N) removal of item from linked list. Slow as hell.
     
-    bucket_heap[orig_idx].remove(pair);
-    rem_count++;
     
-    //What we should do, but it's not that simple :/
-    /*
-    std::list<int>::iterator iter = list.end();
-    iter--;
-    list.erase(iters[pair]);
-    */
+    //bucket_heap[orig_idx].remove(pair);
+    bucket_heap[orig_idx].erase(iters[pair]);
+    
 
     heap_insert(bucket_heap, b_num, pair, val, n, iters);
 }
@@ -98,7 +88,6 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
                 ret_val = bucket_heap[i].front();
                 //printf("Retval: %d\n", ret_val);
                 bucket_heap[i].pop_front();
-                rem_count++;
                 return ret_val;
             
             } else {
@@ -153,7 +142,6 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
                 heap_insert(bucket_heap, b_num, i*n + j, graph[i*n + j], n, iters);
                 #else
                 handles[i*n + j] = heap.push(vert);
-                add_count++;
                 #endif
             }
         }
@@ -178,14 +166,12 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
             heap_insert(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
             #else
             handles[u*n + w] = heap.push(vert);
-            add_count++;
             #endif
         } else {
             #ifdef BUCKET
             heap_decrease(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
             #else
             heap.increase(handles[u*n + w], vert);
-            dec_count++;
             #endif
         }
 
@@ -246,10 +232,8 @@ void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr,
         v = vert.v;
         //Has to happen AFTER setting u and v, or there will be a segfault
         heap.pop();
-        rem_count++;
         #endif
        
-        loop_count++;
         L[p[u*n + v]*n + v].push_back(u);
         R[u*n + q[u*n + v]].push_back(v);
 
@@ -407,8 +391,6 @@ int main( int argc, char **argv )
     }
 
     //Printing out times
-
-    printf("\nAdd: %d\tRem: %d\tDec: %d\tLoop: %d\n", add_count, rem_count, dec_count, loop_count);
     if( find_option( argc, argv, "-csv" ) == -1 ) {
         printf("\nTimes:\n");
         printf("Floyd Warshall: %f\n", floyd_time);
