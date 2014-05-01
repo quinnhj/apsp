@@ -15,6 +15,10 @@ const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
 bool empty = false;
+int add_count = 0;
+int rem_count = 0;
+int dec_count = 0;
+int loop_count = 0;
 //Note, reversed comparator, so call "increase" when decreasing key.
 HEAP<vert_pair, compare<vert_comparator> > heap;
 
@@ -44,11 +48,24 @@ void floyd_warshall(int n, int* par, float* dist) {
 
 }
 
-void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, int val, int n,
+void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
-    int idx = min((int)(val/min_edge), n*n);
+    int idx = (int)(val/min_edge);
+    //printf("val: %f\t min: %f\t idx:%d\n", val, min_edge, idx);
+    idx = min(idx, n*n);
+    //printf("val: %f\t min: %f\t idx:%d\n", val, min_edge, idx);
+
     bucket_heap[idx].push_back(pair);
+    add_count++;
     b_num[pair] = idx;
+
+    if (pair == 117) {
+        printf("Inserting 117 at idx %d\n", idx);
+    }
+
+    if (idx < last_bucket) {
+        printf("ADDING BELOW MIN. pair = %d\tidx = %d\tlast_bucket = %d\t\n", pair, idx, last_bucket);
+    }
     if (bucket_heap[idx].size() < 1) {
         printf("SIZE OF ZERO\n");
     }
@@ -58,16 +75,31 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, int val, int
 }
 
 
-void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, int val, int n,
+void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
     int orig_idx = b_num[pair];
+    if (pair == 117) {
+        printf("Attempting to delete 117 at idx %d\n", orig_idx);
+    }
     std::list<int> list = bucket_heap[orig_idx];
-    
+    bool failed_to_remove = false;
     //Naive O(N) removal of item from linked list. Slow as hell.
+    if (list.end() == std::find(list.begin(), list.end(), pair)) {
+        printf("Removing invalid item. pair = %d\tidx = %d\tlast_bucket = %d\t\n", pair, orig_idx, last_bucket);
+        rem_count--;
+        failed_to_remove = true;
+    }
     list.remove(pair);
+    rem_count++;
     //What we should do, but it's not that simple :/
-    //list.erase(iters[pair]);
-    heap_insert(bucket_heap, b_num, pair, val, n, iters);
+    /*
+    std::list<int>::iterator iter = list.end();
+    iter--;
+    list.erase(iters[pair]);
+    */
+    if (!failed_to_remove) {
+        heap_insert(bucket_heap, b_num, pair, val, n, iters);
+    }
 }
 
 
@@ -77,8 +109,14 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
     for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
         if (bucket_heap[i].size() > 0) {
             if (i < n*n) {
+                int size_before = bucket_heap[i].size();
                 ret_val = bucket_heap[i].front();
+                //printf("Retval: %d\n", ret_val);
                 bucket_heap[i].pop_front();
+                if (size_before != bucket_heap[i].size() + 1){
+                    printf("Bad Pop\n");
+                }
+                rem_count++;
                 return ret_val;
             } else {
                 //This should be implemented using a real heap as per the paper.
@@ -132,6 +170,7 @@ void di_init(int n, float* dist, float* graph, vert_pair* q_arr, int* p, int* q,
                 heap_insert(bucket_heap, b_num, i*n + j, graph[i*n + j], n, iters);
                 #else
                 handles[i*n + j] = heap.push(vert);
+                add_count++;
                 #endif
             }
         }
@@ -156,12 +195,14 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph, vert_pair
             heap_insert(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
             #else
             handles[u*n + w] = heap.push(vert);
+            add_count++;
             #endif
         } else {
             #ifdef BUCKET
             heap_decrease(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
             #else
             heap.increase(handles[u*n + w], vert);
+            dec_count++;
             #endif
         }
 
@@ -222,8 +263,10 @@ void di_apsp(int n, float* dist, float* graph, vert_pair* q_arr,
         v = vert.v;
         //Has to happen AFTER setting u and v, or there will be a segfault
         heap.pop();
+        rem_count++;
         #endif
-        
+       
+        loop_count++;
         L[p[u*n + v]*n + v].push_back(u);
         R[u*n + q[u*n + v]].push_back(v);
 
@@ -382,6 +425,7 @@ int main( int argc, char **argv )
 
     //Printing out times
 
+    printf("\nAdd: %d\tRem: %d\tDec: %d\tLoop: %d\n", add_count, rem_count, dec_count, loop_count);
     if( find_option( argc, argv, "-csv" ) == -1 ) {
         printf("\nTimes:\n");
         printf("Floyd Warshall: %f\n", floyd_time);
