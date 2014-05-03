@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <math.h>
 #include "common.h"
-#include <omp.h>
+#include "omp.h"
 #include <list>
 #include <vector>
 
@@ -122,42 +122,6 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
 }
 
 /*
- * Attempt to extract as many minimum values from the heap as possible.
- * It returns empty as failure, signifying an empty heap.
- * Otherwise, it returns a vector.
- */
-std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, int n,
-        std::list<int>::iterator* iters) {
-
-    std::vector<int> ret_val;
-
-    // Walk through each bucket in order. The initializing/incrementing
-    // with last_bucket ensures that we only ever see each index once.
-    for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
-        if (bucket_heap[i].size() > 0) {
-            // If it's a normal bucket
-            if (i < n*n) {
-                
-                // Remove an item from the bucket and return it.
-                ret_val.push_back(bucket_heap[i].front());
-                bucket_heap[i].pop_front();
-                return ret_val;
-
-            // Else it's the overflow bucket, which is handled using a fib heap.
-            } else {
-                // This should be implemented using a fib heap as per the paper.
-                // For now enforcing that this scenario can't happen by limiting
-                // the minimum edge value.
-                return ret_val;
-            }
-        }
-    }
-
-    // Return -1 if the heap is empty
-    return ret_val;
-}
-
-/*
  * Initializer function for the DI APSP algorithm.
  */
 void di_init(int n, float* dist, float* graph, int* p, int* q,
@@ -234,26 +198,21 @@ void di_lists(int n, int u, int v, float* dist, float* graph,
 
     int lidx = u*n + q[u*n + v];
     int ridx = p[u*n + v]*n + v;
-    int i = 0;
+    std::vector<int>::size_type i = 0;
 
-    int lsize = (int)L[lidx].size();
-    //#pragma omp parallel for
-    for (i = 0; i < lsize; i++) {
+    for (i = 0; i != L[lidx].size(); i++) {
 
         di_examine(n, L[lidx][i], u, v, dist, graph,
             p, q, L, R, bucket_heap, b_num, iters);
 
     }
- 
-    int rsize = (int)R[ridx].size();
-    //#pragma omp parallel for
-    for (i = 0; i < rsize; i++) {
-        
+  
+    for (i = 0; i != R[ridx].size(); i++) {
+
         di_examine(n, u, v, R[ridx][i], dist, graph,
             p, q, L, R, bucket_heap, b_num, iters);
 
     }
-   
 }
 
 /*
@@ -266,49 +225,26 @@ void di_apsp(int n, float* dist, float* graph,
     
     // Initialize
     di_init(n, dist, graph, p, q, L, R, bucket_heap, b_num, iters);
-    int u, v, pair, set_size;
-    std::vector<int> working_set;
+    int u, v, pair;
 
     //Main loop
     while (1) {
 
-        /*
         // Get min (u,v) pair from the heap.
         // Break the loop if heap was empty.
         pair = heap_extract(bucket_heap, b_num, n, iters);
         if (pair < 0) break;
         u = pair/n;
         v = pair%n;
-        */
+       
+        // Add to relevant lists
+        L[p[u*n + v]*n + v].push_back(u);
+        R[u*n + q[u*n + v]].push_back(v);
 
-        // Get as many min (u,v) pairs as we can do in parallel from the heap.
-        // Break the loop if heap was empty.
-        working_set = heap_extract_multiple(bucket_heap, b_num, n, iters);
-        set_size = (int) working_set.size();
-        if (set_size == 0) {
-            break;
-        }
-        
-        // For everything in the set, do in parallel.
-        // Slow as hell, but if the set returned is valid, it is correct.
-        // Way too much overhead at the moment though :(.
-        #pragma omp parallel for
-        for (int i = 0; i < set_size; i++) {
-
-            u = working_set[i]/n;
-            v = working_set[i]%n;
-
-            // Add to relevant lists
-            L[p[u*n + v]*n + v].push_back(u);
-            R[u*n + q[u*n + v]].push_back(v);
-
-            // Examine through the lists.
-            di_lists(n, u, v, dist, graph, 
-                p, q, L, R, bucket_heap, b_num, iters);
-        
-        }
+        // Examine through the lists.
+        di_lists(n, u, v, dist, graph, 
+            p, q, L, R, bucket_heap, b_num, iters);
     }
-
 }
 
 
@@ -325,15 +261,11 @@ int main( int argc, char **argv )
         printf( "Options:\n" );
         printf( "-h to see this help\n" );
         printf( "-n <int> to set the number of vertices\n" );
-        printf( "-t <int> to set number of threads. Default 1\n");
         printf( "-no turns off all correctness checks\n");
         printf( "-csv outputs in csv format (n, floyd_time, di_time)\n");
         return 0;
     } 
     int n = read_int( argc, argv, "-n", 100 );
-    int num_threads = read_int( argc, argv, "-t", 1);
-    omp_set_num_threads(num_threads);
-    printf("Running with %d threads.\n", num_threads);
 
     /*
      * Setting up the data structures
