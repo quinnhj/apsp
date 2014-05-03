@@ -17,6 +17,10 @@ int last_bucket = 0;
  * It is used for correctness checking, as well as sanity check on performance
  */
 void floyd_warshall(int n, int* par, float* dist) {
+    
+    /*
+    // Commenting out parent calculations
+    // Uncommend if  you want parent matrix
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (i == j || dist[i*n + j] == INF) {
@@ -26,6 +30,7 @@ void floyd_warshall(int n, int* par, float* dist) {
             }
         }
     }
+    */
 
     float new_dist;
     for (int k = 0; k < n; k++) {
@@ -34,7 +39,9 @@ void floyd_warshall(int n, int* par, float* dist) {
                 new_dist = dist[i*n + k] + dist[k*n + j];
                 if (new_dist < dist[i*n + j]) {
                     dist[i*n + j] = new_dist;
-                    par[i*n + j] = par[k*n + j];
+                    
+                    // Uncomment this if you want parent matrix
+                    //par[i*n + j] = par[k*n + j];
                 }
             }
         }
