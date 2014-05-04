@@ -12,6 +12,7 @@
 const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
+omp_lock_t heap_lock;
 
 // Counting variables
 int size_sum = 0;
@@ -272,11 +273,13 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph,
         dist[u*n + w] = dist[u*n + v] + dist[v*n + w];
         
         // If it's never been inserted, insert, else decrease.
+        omp_set_lock(&heap_lock);
         if (p[u*n + w] == -1) {    
             heap_insert(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
         } else {
             heap_decrease(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
         }
+        omp_unset_lock(&heap_lock);
 
         p[u*n + w] = p[u*n + v];
         q[u*n + w] = q[v*n + w];
@@ -326,7 +329,7 @@ void di_apsp(int n, float* dist, float* graph,
     
     // Initialize
     di_init(n, dist, graph, p, q, L, R, bucket_heap, b_num, iters);
-    int u, v, pair, set_size;
+    int pair, set_size;
     std::vector<int> working_set;
 
     //Main loop
@@ -356,11 +359,11 @@ void di_apsp(int n, float* dist, float* graph,
         // For everything in the set, do in parallel.
         // Slow as hell, but if the set returned is valid, it is correct.
         // Way too much overhead at the moment though :(.
-        // #pragma omp parallel for
+        #pragma omp parallel for
         for (int i = 0; i < set_size; i++) {
 
-            u = working_set[i]/n;
-            v = working_set[i]%n;
+            int u = working_set[i]/n;
+            int v = working_set[i]%n;
 
             // Add to relevant lists
             L[p[u*n + v]*n + v].push_back(u);
@@ -371,6 +374,8 @@ void di_apsp(int n, float* dist, float* graph,
                 p, q, L, R, bucket_heap, b_num, iters);
         
         }
+        #pragma omp barrier
+
     }
 
 }
@@ -398,6 +403,7 @@ int main( int argc, char **argv )
     int num_threads = read_int( argc, argv, "-t", 1);
     omp_set_num_threads(num_threads);
     printf("Running with %d threads.\n", num_threads);
+    omp_init_lock(&heap_lock);
 
     /*
      * Setting up the data structures
@@ -569,6 +575,8 @@ int main( int argc, char **argv )
     free(p);
     free(q);
     free(b_num);
+   
+    omp_destroy_lock(&heap_lock);
     
     return 0;
 }
