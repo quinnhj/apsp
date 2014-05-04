@@ -8,11 +8,13 @@
 #include <vector>
 #include <unordered_set>
 
+#define NUM_LOCKS 100
+
 // Globals for convenience.
 const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
-omp_lock_t heap_lock;
+omp_lock_t* heap_locks;
 
 // Counting variables
 int size_sum = 0;
@@ -72,11 +74,13 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
     }
 
     // Add to bucket
+    omp_set_lock(heap_locks + (idx % NUM_LOCKS));
     bucket_heap[idx].push_back(pair);
+    std::list<int>::iterator iter = bucket_heap[idx].end();
+    omp_unset_lock(heap_locks + (idx % NUM_LOCKS));
     
     // Update bookkeeping so that we can decrement this in constant time.
     b_num[pair] = idx; // array storing bucket numbers
-    std::list<int>::iterator iter = bucket_heap[idx].end();
     iter--;
     iters[pair] = iter; // pointer to position in said bucket
 }
@@ -90,7 +94,9 @@ void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val,
         std::list<int>::iterator* iters) {
     
     // Deleting 'pair' from its bucket.
+    omp_set_lock(heap_locks + (b_num[pair] % NUM_LOCKS));
     bucket_heap[b_num[pair]].erase(iters[pair]);
+    omp_unset_lock(heap_locks + (b_num[pair] % NUM_LOCKS));
     
     // Inserting it into heap with a new value.
     heap_insert(bucket_heap, b_num, pair, val, n, iters);
@@ -273,13 +279,11 @@ void di_examine(int n, int u, int v, int w, float* dist, float* graph,
         dist[u*n + w] = dist[u*n + v] + dist[v*n + w];
         
         // If it's never been inserted, insert, else decrease.
-        omp_set_lock(&heap_lock);
         if (p[u*n + w] == -1) {    
             heap_insert(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
         } else {
             heap_decrease(bucket_heap, b_num, u*n + w, dist[u*n + w], n, iters);
         }
-        omp_unset_lock(&heap_lock);
 
         p[u*n + w] = p[u*n + v];
         q[u*n + w] = q[v*n + w];
@@ -359,7 +363,7 @@ void di_apsp(int n, float* dist, float* graph,
         // For everything in the set, do in parallel.
         // Slow as hell, but if the set returned is valid, it is correct.
         // Way too much overhead at the moment though :(.
-        #pragma omp parallel for
+        #pragma omp parallel for //schedule(dynamic)
         for (int i = 0; i < set_size; i++) {
 
             int u = working_set[i]/n;
@@ -374,7 +378,7 @@ void di_apsp(int n, float* dist, float* graph,
                 p, q, L, R, bucket_heap, b_num, iters);
         
         }
-        #pragma omp barrier
+        //#pragma omp barrier
 
     }
 
@@ -403,8 +407,12 @@ int main( int argc, char **argv )
     int num_threads = read_int( argc, argv, "-t", 1);
     omp_set_num_threads(num_threads);
     printf("Running with %d threads.\n", num_threads);
-    omp_init_lock(&heap_lock);
-
+    
+    heap_locks = (omp_lock_t*) malloc(NUM_LOCKS * sizeof(omp_lock_t));
+    for (int i = 0; i < NUM_LOCKS; i++) {
+        omp_init_lock(heap_locks + i);
+    }
+    
     /*
      * Setting up the data structures
      * All data structures are assumed to be row major.
@@ -575,8 +583,11 @@ int main( int argc, char **argv )
     free(p);
     free(q);
     free(b_num);
-   
-    omp_destroy_lock(&heap_lock);
-    
+  
+    for (int i = 0; i < NUM_LOCKS; i++) {
+        omp_destroy_lock(heap_locks + i);
+    } 
+    free(heap_locks);
+
     return 0;
 }
