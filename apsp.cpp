@@ -144,7 +144,7 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
     for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
-        if (bucket_heap[i].size() > 0) {
+        while (bucket_heap[i].size() > 0) {
             // If it's a normal bucket
             if (i < n*n) {
                 
@@ -161,12 +161,14 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 // dependencies. Probably slow as hell...
                
                 set.insert(pair);
+                set.insert(p[pair]);
+                set.insert(q[pair]);
                 set.insert(p[pair]*n + v);
                 set.insert(u*n + q[pair]);
-                num_added = 3;
+                num_added = 5;
                
-                printf("first three: %d, %d, %d\n", pair, p[pair]*n + v, u*n + q[pair]);
-                printf("next: ");
+                //printf("first three: %d, %d, %d\n", pair, p[pair]*n + v, u*n + q[pair]);
+                //printf("next: ");
                 
                 int lsize = (int)L[pair].size();
                 int rsize = (int)R[pair].size();
@@ -174,41 +176,44 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                     smallest_delta = min(dist[pair] + dist[L[pair][j]*n + u], smallest_delta);
                     set.insert(L[pair][j]*n + v);
                     num_added++;
-                    printf("%d, ", L[pair][j]*n + v);
+                    //printf("%d, ", L[pair][j]*n + v);
                 }
                 for (int j = 0; j < rsize; j++) {
                     smallest_delta = min(dist[pair] + dist[v*n +  R[pair][j]], smallest_delta);
                     set.insert(u*n + R[pair][j]);
                     num_added++;
-                    printf("%d, ", u*n + R[pair][j]);
+                    //printf("%d, ", u*n + R[pair][j]);
                 }
-                printf("\n");
+                //printf("\n");
                 
-                if (last_val > smallest_delta || (set.size() - set_start_size) < num_added) {
+                if (last_val >= smallest_delta || (set.size() - set_start_size) < num_added) {
                 //if (last_val > smallest_delta) {
+                    /*
                     printf("last_val: %f\tsmallest_delt: %f\n", last_val, smallest_delta);
                     printf("set size: %d\tset start: %d\tnum_added: %d\n",
                                     (int)set.size(), set_start_size, num_added);
-                    
+                    */
+
                     if ((int)ret_val.size() == 0) {
                         ret_val.push_back(pair);
                         bucket_heap[i].pop_front();
                     }
 
-                    break;
+                    return ret_val;
                 }
 
                 
                 // Remove an item from the bucket and return it.
                 ret_val.push_back(pair);
                 bucket_heap[i].pop_front();
-                //break;
+                //return ret_val;
 
             // Else it's the overflow bucket, which is handled using a fib heap.
             } else {
                 // This should be implemented using a fib heap as per the paper.
                 // For now enforcing that this scenario can't happen by limiting
                 // the minimum edge value.
+                return ret_val;
             }
         }
     }
@@ -356,7 +361,7 @@ void di_apsp(int n, float* dist, float* graph,
         // For everything in the set, do in parallel.
         // Slow as hell, but if the set returned is valid, it is correct.
         // Way too much overhead at the moment though :(.
-        #pragma omp parallel for
+        //#pragma omp parallel for
         for (int i = 0; i < set_size; i++) {
 
             u = working_set[i]/n;
