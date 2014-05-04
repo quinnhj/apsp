@@ -13,6 +13,7 @@ const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
 
+// Counting variables
 int size_sum = 0;
 int size_count = 0;
 
@@ -64,6 +65,10 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
     // Figure out which bucket to insert into
     int idx = (int)(val/min_edge);
     idx = min(idx, n*n);
+
+    if (idx < last_bucket) {
+        printf("INSERTING TOO EARLY, idx = %d\n", idx);
+    }
 
     // Add to bucket
     bucket_heap[idx].push_back(pair);
@@ -137,9 +142,9 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     // Setting up data structures to ensure we don't destroy stuff in parallel.
     std::vector<int> ret_val;
     std::unordered_set<int> set;
-    float last_val = 0.0;
-    float smallest_delta = INF;
-    int pair, u, v, set_start_size, num_added;
+    int smallest_delta = n*n + 1;
+    int pair, u, v, set_start_size, num_added, lidx, ridx;
+    int rollback_bucket = 0;
 
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
@@ -148,65 +153,55 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
             // If it's a normal bucket
             if (i < n*n) {
                 
-                last_val = i*min_edge;
-
                 pair = bucket_heap[i].front();
                 u = pair/n;
                 v = pair%n;
+                lidx = u*n + q[u*n + v];
+                ridx = p[u*n + v]*n + v;
                 
                 set_start_size = (int)set.size();
-                // Here we make sure that we can't have an element drop
-                // in key to our working set.
-                // Here we check to make sure this doesn't cause any data
-                // dependencies. Probably slow as hell...
                
                 set.insert(pair);
-                set.insert(p[pair]);
-                set.insert(q[pair]);
                 set.insert(p[pair]*n + v);
                 set.insert(u*n + q[pair]);
-                num_added = 5;
+                num_added = 3;
                
-                //printf("first three: %d, %d, %d\n", pair, p[pair]*n + v, u*n + q[pair]);
-                //printf("next: ");
+                int lsize = (int)L[lidx].size();
+                int rsize = (int)R[ridx].size();
+                float val;
                 
-                int lsize = (int)L[pair].size();
-                int rsize = (int)R[pair].size();
                 for (int j = 0; j < lsize; j++) {
-                    smallest_delta = min(dist[pair] + dist[L[pair][j]*n + u], smallest_delta);
-                    set.insert(L[pair][j]*n + v);
-                    num_added++;
-                    //printf("%d, ", L[pair][j]*n + v);
+                    val = dist[pair] + dist[L[lidx][j]*n + u];
+                    smallest_delta = min((int)(val/min_edge), smallest_delta);
+                    set.insert(L[lidx][j]*n + v);
+                    set.insert(L[lidx][j]*n + u);
+                    num_added += 2;
                 }
+               
                 for (int j = 0; j < rsize; j++) {
-                    smallest_delta = min(dist[pair] + dist[v*n +  R[pair][j]], smallest_delta);
-                    set.insert(u*n + R[pair][j]);
-                    num_added++;
-                    //printf("%d, ", u*n + R[pair][j]);
+                    val = dist[pair] + dist[v*n +  R[ridx][j]];
+                    smallest_delta = min((int)(val/min_edge), smallest_delta);
+                    set.insert(u*n + R[ridx][j]);
+                    set.insert(v*n + R[ridx][j]);
+                    num_added += 2;
                 }
-                //printf("\n");
                 
-                if (last_val >= smallest_delta || (set.size() - set_start_size) < num_added) {
-                //if (last_val > smallest_delta) {
-                    /*
-                    printf("last_val: %f\tsmallest_delt: %f\n", last_val, smallest_delta);
-                    printf("set size: %d\tset start: %d\tnum_added: %d\n",
-                                    (int)set.size(), set_start_size, num_added);
-                    */
+                if (i > smallest_delta || (set.size() - set_start_size) < num_added) {
 
                     if ((int)ret_val.size() == 0) {
                         ret_val.push_back(pair);
                         bucket_heap[i].pop_front();
+                    } else {
+                        last_bucket = rollback_bucket;
                     }
 
                     return ret_val;
                 }
 
-                
                 // Remove an item from the bucket and return it.
                 ret_val.push_back(pair);
                 bucket_heap[i].pop_front();
-                //return ret_val;
+                rollback_bucket = i;
 
             // Else it's the overflow bucket, which is handled using a fib heap.
             } else {
@@ -361,7 +356,7 @@ void di_apsp(int n, float* dist, float* graph,
         // For everything in the set, do in parallel.
         // Slow as hell, but if the set returned is valid, it is correct.
         // Way too much overhead at the moment though :(.
-        //#pragma omp parallel for
+        // #pragma omp parallel for
         for (int i = 0; i < set_size; i++) {
 
             u = working_set[i]/n;
