@@ -28,7 +28,7 @@ void floyd_warshall(int n, int* par, float* dist) {
     
     /*
     // Commenting out parent calculations
-    // Uncommend if  you want parent matrix
+    // Uncomment if  you want parent matrix
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (i == j || dist[i*n + j] == INF) {
@@ -583,7 +583,12 @@ int main( int argc, char **argv )
     free(p);
     free(q);
     free(b_num);
-  
+
+    delete[] L;
+    delete[] R;
+    delete[] bucket_heap;
+    delete[] iters;
+
     for (int i = 0; i < NUM_LOCKS; i++) {
         omp_destroy_lock(heap_locks + i);
     } 

@@ -4,7 +4,7 @@
 # Boost library install as an environment variable, otherwise it won't compile.
 #
 
-CC = g++
+CC = g++-4.9
 OPENMP = -fopenmp
 #OPENMP =
 CFLAGS = -O3
@@ -36,4 +36,4 @@ common.o: common.cpp common.h
 	$(CC) $(GPROF) $(CPP_FLAG) -c $(OPENMP) $(CFLAGS) common.cpp
 
 clean:
-	rm -f *.o $(TARGETS) *.stdout *.txt
+	rm -f *.o $(TARGETS)
