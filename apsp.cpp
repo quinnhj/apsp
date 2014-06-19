@@ -14,7 +14,14 @@
 const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
+int last_count = 1;
 omp_lock_t* heap_locks;
+
+int* pcount;
+int* qcount;
+int* Lcount;
+int* Rcount;
+int* distcount;
 
 // Counting variables
 int size_sum = 0;
@@ -137,6 +144,20 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
     return -1;
 }
 
+
+bool incr_check (int* arr, bool* success, int val, int pos) {
+    //printf("Starting Incr\n");
+    if (arr[pos] == val || !*success) {
+        *success = false;
+    } else {
+        arr[pos] = val;
+        *success = true;
+    }
+    //printf("Ending Incr\n");
+}
+
+
+
 /*
  * Attempt to extract as many minimum values from the heap as possible.
  * It returns empty as failure, signifying an empty heap.
@@ -148,11 +169,14 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
 
     // Setting up data structures to ensure we don't destroy stuff in parallel.
     std::vector<int> ret_val;
-    std::unordered_set<int> set;
+    //std::unordered_set<int> set;
     int smallest_delta = n*n + 1;
     int pair, u, v, set_start_size, num_added, lidx, ridx;
     int rollback_bucket = 0;
-
+    bool success = true;
+    last_count++;
+    
+    //printf("Starting extra multiple\n");
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
     for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
@@ -166,12 +190,17 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 lidx = u*n + q[u*n + v];
                 ridx = p[u*n + v]*n + v;
                 
-                set_start_size = (int)set.size();
+                //set_start_size = (int)set.size();
                
-                set.insert(pair);
-                set.insert(p[pair]*n + v);
-                set.insert(u*n + q[pair]);
-                num_added = 3;
+                //incr_check(distcount, &success, last_count, pair);
+                //incr_check(pcount, &success, last_count, pair);
+                incr_check(pcount, &success, last_count, pair);
+                incr_check(pcount, &success, last_count, p[pair]*n + v);
+                incr_check(pcount, &success, last_count, u*n + q[pair]);
+                //set.insert(pair);
+                //set.insert(p[pair]*n + v);
+                //set.insert(u*n + q[pair]);
+                //num_added = 3;
                
                 int lsize = (int)L[lidx].size();
                 int rsize = (int)R[ridx].size();
@@ -180,20 +209,24 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 for (int j = 0; j < lsize; j++) {
                     val = dist[pair] + dist[L[lidx][j]*n + u];
                     smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    set.insert(L[lidx][j]*n + v);
-                    set.insert(L[lidx][j]*n + u);
-                    num_added += 2;
+                    incr_check(pcount, &success, last_count, L[lidx][j]*n + v);
+                    incr_check(pcount, &success, last_count, L[lidx][j]*n + u);
+                    //set.insert(L[lidx][j]*n + v);
+                    //set.insert(L[lidx][j]*n + u);
+                    //num_added += 2;
                 }
                
                 for (int j = 0; j < rsize; j++) {
                     val = dist[pair] + dist[v*n +  R[ridx][j]];
                     smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    set.insert(u*n + R[ridx][j]);
-                    set.insert(v*n + R[ridx][j]);
-                    num_added += 2;
+                    incr_check(pcount, &success, last_count, u*n + R[ridx][j]);
+                    incr_check(pcount, &success, last_count, v*n + R[ridx][j]);
+                    //set.insert(u*n + R[ridx][j]);
+                    //set.insert(v*n + R[ridx][j]);
+                    //num_added += 2;
                 }
                 
-                if (i > smallest_delta || (set.size() - set_start_size) < num_added) {
+                if (i > smallest_delta || !success) {
 
                     if ((int)ret_val.size() == 0) {
                         ret_val.push_back(pair);
@@ -459,6 +492,13 @@ int main( int argc, char **argv )
 
     // Dist array for DI
     float *di_dist = (float*) malloc( n * n * sizeof(float));
+
+    pcount = (int*) malloc(n*n*sizeof(int));
+    qcount = (int*) malloc(n*n*sizeof(int));
+    Lcount = (int*) malloc(n*n*sizeof(int));
+    Rcount = (int*) malloc(n*n*sizeof(int));
+    distcount = (int*) malloc(n*n*sizeof(int));
+
  
     /*
      * Initializing values.
@@ -487,6 +527,11 @@ int main( int argc, char **argv )
         fw_dist[i] = graph[i];
         di_dist[i] = graph[i];
         b_num[i] = 0;
+        pcount[i] = 0;
+        qcount[i] = 0;
+        Lcount[i] = 0;
+        Rcount[i] = 0;
+        distcount[i] = 0;
     }
 
     /*
@@ -583,6 +628,12 @@ int main( int argc, char **argv )
     free(p);
     free(q);
     free(b_num);
+    
+    free(pcount);
+    free(qcount);
+    free(Lcount);
+    free(Rcount);
+    free(distcount);
 
     delete[] L;
     delete[] R;
