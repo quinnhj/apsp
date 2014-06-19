@@ -16,12 +16,16 @@ float min_edge = 1.0;
 int last_bucket = 0;
 int last_count = 1;
 omp_lock_t* heap_locks;
+omp_lock_t success_lock;
+omp_lock_t delta_lock;
+int n_threads = 1;
 
 int* pcount;
 int* qcount;
 int* Lcount;
 int* Rcount;
 int* distcount;
+int* popped_items;
 
 // Counting variables
 int size_sum = 0;
@@ -148,15 +152,71 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
 bool incr_check (int* arr, bool* success, int val, int pos, bool write) {
     
     int newval = write ? val : val + 1;
+    bool temp;
 
+    omp_set_lock(&success_lock);
     if (arr[pos] >= newval || !*success) {
-        *success = false;
+        temp = false;
     } else {
         arr[pos] = val;
-        *success = true;
+        temp = true;
     }
 
+    *success = temp;
+    omp_unset_lock(&success_lock);
+
 }
+
+
+bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
+        std::list<int>::iterator* iters,
+        float* dist, int* p, int* q, std::vector<int>* L, std::vector<int>* R,
+        int pair, int last_count, bool* success, int* smallest_delta) {
+
+    int u = pair/n;
+    int v = pair%n;
+    int lidx = u*n + q[u*n + v];
+    int ridx = p[u*n + v]*n + v;
+    int my_smallest_delta = *smallest_delta;
+    
+    incr_check(distcount, success, last_count, pair, false);
+    incr_check(pcount, success, last_count, pair, false);
+    incr_check(qcount, success, last_count, pair, false);
+    
+    incr_check(Lcount, success, last_count, lidx, false);
+    incr_check(Lcount, success, last_count, p[pair]*n + v, true);
+    incr_check(Rcount, success, last_count, ridx, false);
+    incr_check(Rcount, success, last_count, u*n + q[pair], true);
+   
+    int lsize = (int)L[lidx].size();
+    int rsize = (int)R[ridx].size();
+    float val;
+    
+    for (int j = 0; j < lsize; j++) {
+        val = dist[pair] + dist[L[lidx][j]*n + u];
+        my_smallest_delta = min((int)(val/min_edge), my_smallest_delta);
+        incr_check(distcount, success, last_count, L[lidx][j]*n + u, false);
+        incr_check(distcount, success, last_count, L[lidx][j]*n + v, true);
+        incr_check(pcount, success, last_count, L[lidx][j]*n + v, true);
+        incr_check(pcount, success, last_count, L[lidx][j]*n + u, false);
+        incr_check(qcount, success, last_count, L[lidx][j]*n + v, true);
+    }
+   
+    for (int j = 0; j < rsize; j++) {
+        val = dist[pair] + dist[v*n +  R[ridx][j]];
+        my_smallest_delta = min((int)(val/min_edge), my_smallest_delta);
+        incr_check(distcount, success, last_count, v*n + R[ridx][j], false);
+        incr_check(distcount, success, last_count, u*n + R[ridx][j], true);
+        incr_check(pcount, success, last_count, u*n + R[ridx][j], true);
+        incr_check(qcount, success, last_count, u*n + R[ridx][j], true);
+        incr_check(qcount, success, last_count, v*n + R[ridx][j], false);
+    }
+
+    omp_set_lock(&delta_lock);
+    *smallest_delta = min(my_smallest_delta, *smallest_delta);
+    omp_unset_lock(&delta_lock);
+
+} 
 
 
 
@@ -171,92 +231,103 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
 
     // Setting up data structures to ensure we don't destroy stuff in parallel.
     std::vector<int> ret_val;
-    //std::unordered_set<int> set;
     int smallest_delta = n*n + 1;
     int pair, u, v, set_start_size, num_added, lidx, ridx;
     int rollback_bucket = 0;
     bool success = true;
     last_count += 2;
     
-    //printf("Starting extra multiple\n");
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
-    for (int i = last_bucket; i < n*n + 1; i++,last_bucket++) {
+    for (int i = last_bucket; i < n*n + 1; i++, last_bucket++) {
         while (bucket_heap[i].size() > 0) {
-            // If it's a normal bucket
-            if (i < n*n) {
-                
-                pair = bucket_heap[i].front();
-                u = pair/n;
-                v = pair%n;
-                lidx = u*n + q[u*n + v];
-                ridx = p[u*n + v]*n + v;
-                
-                //set_start_size = (int)set.size();
-               
-                incr_check(distcount, &success, last_count, pair, false);
-                incr_check(pcount, &success, last_count, pair, false);
-                incr_check(qcount, &success, last_count, pair, false);
-                
-                incr_check(Lcount, &success, last_count, lidx, false);
-                incr_check(Lcount, &success, last_count, p[pair]*n + v, true);
-                incr_check(Rcount, &success, last_count, ridx, false);
-                incr_check(Rcount, &success, last_count, u*n + q[pair], true);
-                //set.insert(pair);
-                //set.insert(p[pair]*n + v);
-                //set.insert(u*n + q[pair]);
-                //num_added = 3;
-               
-                int lsize = (int)L[lidx].size();
-                int rsize = (int)R[ridx].size();
-                float val;
-                
-                for (int j = 0; j < lsize; j++) {
-                    val = dist[pair] + dist[L[lidx][j]*n + u];
-                    smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    incr_check(distcount, &success, last_count, L[lidx][j]*n + u, false);
-                    //incr_check(distcount, &success, last_count, u*n + v);
-                    incr_check(distcount, &success, last_count, L[lidx][j]*n + v, true);
-                    incr_check(pcount, &success, last_count, L[lidx][j]*n + v, true);
-                    incr_check(pcount, &success, last_count, L[lidx][j]*n + u, false);
-                    incr_check(qcount, &success, last_count, L[lidx][j]*n + v, true);
-                    //incr_check(qcount, &success, last_count, u*n + v);
-                    //set.insert(L[lidx][j]*n + v);
-                    //set.insert(L[lidx][j]*n + u);
-                    //num_added += 2;
-                }
-               
-                for (int j = 0; j < rsize; j++) {
-                    val = dist[pair] + dist[v*n +  R[ridx][j]];
-                    smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    //incr_check(distcount, &success, last_count, u*n + v);
-                    incr_check(distcount, &success, last_count, v*n + R[ridx][j], false);
-                    incr_check(distcount, &success, last_count, u*n + R[ridx][j], true);
-                    incr_check(pcount, &success, last_count, u*n + R[ridx][j], true);
-                    //incr_check(pcount, &success, last_count, u*n + v);
-                    incr_check(qcount, &success, last_count, u*n + R[ridx][j], true);
-                    incr_check(qcount, &success, last_count, v*n + R[ridx][j], false);
-                    //set.insert(u*n + R[ridx][j]);
-                    //set.insert(v*n + R[ridx][j]);
-                    //num_added += 2;
-                }
-                
-                if (i > smallest_delta || !success) {
 
-                    if ((int)ret_val.size() == 0) {
-                        ret_val.push_back(pair);
-                        bucket_heap[i].pop_front();
-                    } else {
-                        last_bucket = rollback_bucket;
+            //If it's a normal bucket
+            if (i < n*n) {
+                bool parallel_success = true;
+                int temp_i = i;
+                int num_items = 0;
+                std::list<int>::iterator listIter;
+                
+                //Populate popped_items with the next < n_threads items
+                while (num_items < n_threads && temp_i < n*n) {
+                    //printf("List size: %d\n", (int)bucket_heap[temp_i].size());
+                    for(listIter = bucket_heap[temp_i].begin(); 
+                            listIter != bucket_heap[temp_i].end() && num_items < n_threads;
+                            listIter++, num_items++) {
+
+                        //printf("Adding to popped items, num_items = %d\n", num_items);
+                        popped_items[num_items] = *listIter;
+                        //printf("Popped item: %d\n", popped_items[num_items]);
+
+                    }
+                    temp_i++;
+                }
+
+                //Check everything in popped_items in parallel
+                //Lock parallel_success when modifying?
+                //#pragma omp parallel for
+                for (int a = 0; a < num_items; a++) {
+                    //printf("Parallel Check, a = %d\tnum_items = %d\n", a, num_items);
+                    check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
+                             popped_items[a], last_count, &parallel_success, &smallest_delta);
+                }
+               
+                //printf("Finished Parallel Check\n");
+                //If everything in this set of num_items was good
+                if (parallel_success && temp_i < smallest_delta) {
+                    //printf("Parallel Success!\n");
+                    //Add num_items to retval
+                    for (int a = 0; a < num_items; a++) {
+                        ret_val.push_back(popped_items[a]);
+                    }
+                    
+                    //Pop num_items from lists.
+                    temp_i = i;
+                    num_items = 0;
+                    while (num_items < n_threads && temp_i < n*n) {
+                        for (int a = 0; a < bucket_heap[temp_i].size() && num_items < n_threads; a++) {
+                            bucket_heap[temp_i].pop_front();
+                            num_items++;
+                        }
+                        temp_i++;
+                    }
+                    
+                    //Temp_i is one greater than the last bucket. Over estimate.
+                    rollback_bucket = max(temp_i - 1, 0); // Last bucket to have 0 or more items.
+                    i = rollback_bucket;
+                    last_bucket = i;
+
+                } else {
+
+                    for (int a = i; a < n*n; a++, last_bucket++) {
+                        while (bucket_heap[a].size() > 0) {
+                            if (a < n*n) {
+                                pair = bucket_heap[a].front();
+                                check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
+                                        pair, last_count, &success, &smallest_delta);
+
+                                if (a > smallest_delta || !success) {
+
+                                    if ((int)ret_val.size() == 0) {
+                                        ret_val.push_back(pair);
+                                        bucket_heap[a].pop_front();
+                                    } else {
+                                        last_bucket = rollback_bucket;
+                                    }
+
+                                    return ret_val;
+                                }
+                                
+                                ret_val.push_back(pair);
+                                bucket_heap[a].pop_front();
+                                rollback_bucket = a;
+                            }
+                        }
                     }
 
                     return ret_val;
                 }
-
-                // Remove an item from the bucket and return it.
-                ret_val.push_back(pair);
-                bucket_heap[i].pop_front();
-                rollback_bucket = i;
 
             // Else it's the overflow bucket, which is handled using a fib heap.
             } else {
@@ -452,14 +523,16 @@ int main( int argc, char **argv )
         return 0;
     } 
     int n = read_int( argc, argv, "-n", 100 );
-    int num_threads = read_int( argc, argv, "-t", 1);
-    omp_set_num_threads(num_threads);
-    printf("Running with %d threads.\n", num_threads);
+    n_threads = read_int( argc, argv, "-t", 1);
+    omp_set_num_threads(n_threads);
+    printf("Running with %d threads.\n", n_threads);
     
     heap_locks = (omp_lock_t*) malloc(NUM_LOCKS * sizeof(omp_lock_t));
     for (int i = 0; i < NUM_LOCKS; i++) {
         omp_init_lock(heap_locks + i);
     }
+    omp_init_lock(&success_lock);
+    omp_init_lock(&delta_lock);
     
     /*
      * Setting up the data structures
@@ -513,6 +586,7 @@ int main( int argc, char **argv )
     Lcount = (int*) malloc(n*n*sizeof(int));
     Rcount = (int*) malloc(n*n*sizeof(int));
     distcount = (int*) malloc(n*n*sizeof(int));
+    popped_items = (int*) malloc(n_threads*sizeof(int));
 
  
     /*
@@ -649,6 +723,7 @@ int main( int argc, char **argv )
     free(Lcount);
     free(Rcount);
     free(distcount);
+    free(popped_items);
 
     delete[] L;
     delete[] R;
