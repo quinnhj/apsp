@@ -145,15 +145,17 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
 }
 
 
-bool incr_check (int* arr, bool* success, int val, int pos) {
-    //printf("Starting Incr\n");
-    if (arr[pos] == val || !*success) {
+bool incr_check (int* arr, bool* success, int val, int pos, bool write) {
+    
+    int newval = write ? val : val + 1;
+
+    if (arr[pos] >= newval || !*success) {
         *success = false;
     } else {
         arr[pos] = val;
         *success = true;
     }
-    //printf("Ending Incr\n");
+
 }
 
 
@@ -174,7 +176,7 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     int pair, u, v, set_start_size, num_added, lidx, ridx;
     int rollback_bucket = 0;
     bool success = true;
-    last_count++;
+    last_count += 2;
     
     //printf("Starting extra multiple\n");
     // Walk through each bucket in order. The initializing/incrementing
@@ -192,11 +194,14 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 
                 //set_start_size = (int)set.size();
                
-                //incr_check(distcount, &success, last_count, pair);
-                //incr_check(pcount, &success, last_count, pair);
-                incr_check(pcount, &success, last_count, pair);
-                incr_check(pcount, &success, last_count, p[pair]*n + v);
-                incr_check(pcount, &success, last_count, u*n + q[pair]);
+                incr_check(distcount, &success, last_count, pair, false);
+                incr_check(pcount, &success, last_count, pair, false);
+                incr_check(qcount, &success, last_count, pair, false);
+                
+                incr_check(Lcount, &success, last_count, lidx, false);
+                incr_check(Lcount, &success, last_count, p[pair]*n + v, true);
+                incr_check(Rcount, &success, last_count, ridx, false);
+                incr_check(Rcount, &success, last_count, u*n + q[pair], true);
                 //set.insert(pair);
                 //set.insert(p[pair]*n + v);
                 //set.insert(u*n + q[pair]);
@@ -209,8 +214,13 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 for (int j = 0; j < lsize; j++) {
                     val = dist[pair] + dist[L[lidx][j]*n + u];
                     smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    incr_check(pcount, &success, last_count, L[lidx][j]*n + v);
-                    incr_check(pcount, &success, last_count, L[lidx][j]*n + u);
+                    incr_check(distcount, &success, last_count, L[lidx][j]*n + u, false);
+                    //incr_check(distcount, &success, last_count, u*n + v);
+                    incr_check(distcount, &success, last_count, L[lidx][j]*n + v, true);
+                    incr_check(pcount, &success, last_count, L[lidx][j]*n + v, true);
+                    incr_check(pcount, &success, last_count, L[lidx][j]*n + u, false);
+                    incr_check(qcount, &success, last_count, L[lidx][j]*n + v, true);
+                    //incr_check(qcount, &success, last_count, u*n + v);
                     //set.insert(L[lidx][j]*n + v);
                     //set.insert(L[lidx][j]*n + u);
                     //num_added += 2;
@@ -219,8 +229,13 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 for (int j = 0; j < rsize; j++) {
                     val = dist[pair] + dist[v*n +  R[ridx][j]];
                     smallest_delta = min((int)(val/min_edge), smallest_delta);
-                    incr_check(pcount, &success, last_count, u*n + R[ridx][j]);
-                    incr_check(pcount, &success, last_count, v*n + R[ridx][j]);
+                    //incr_check(distcount, &success, last_count, u*n + v);
+                    incr_check(distcount, &success, last_count, v*n + R[ridx][j], false);
+                    incr_check(distcount, &success, last_count, u*n + R[ridx][j], true);
+                    incr_check(pcount, &success, last_count, u*n + R[ridx][j], true);
+                    //incr_check(pcount, &success, last_count, u*n + v);
+                    incr_check(qcount, &success, last_count, u*n + R[ridx][j], true);
+                    incr_check(qcount, &success, last_count, v*n + R[ridx][j], false);
                     //set.insert(u*n + R[ridx][j]);
                     //set.insert(v*n + R[ridx][j]);
                     //num_added += 2;
