@@ -81,7 +81,7 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
     idx = min(idx, n*n);
 
     if (idx < last_bucket) {
-        printf("INSERTING TOO EARLY, idx = %d\n", idx);
+        printf("INSERTING TOO EARLY, idx = %d\tlast_bucket= %d\n", idx, last_bucket);
     }
 
     // Add to bucket
@@ -177,7 +177,9 @@ bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
     int v = pair%n;
     int lidx = u*n + q[u*n + v];
     int ridx = p[u*n + v]*n + v;
+    omp_set_lock(&delta_lock);
     int my_smallest_delta = *smallest_delta;
+    omp_unset_lock(&delta_lock);
     
     incr_check(distcount, success, last_count, pair, false);
     incr_check(pcount, success, last_count, pair, false);
@@ -211,7 +213,7 @@ bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
         incr_check(qcount, success, last_count, u*n + R[ridx][j], true);
         incr_check(qcount, success, last_count, v*n + R[ridx][j], false);
     }
-
+    
     omp_set_lock(&delta_lock);
     *smallest_delta = min(my_smallest_delta, *smallest_delta);
     omp_unset_lock(&delta_lock);
@@ -232,9 +234,11 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     // Setting up data structures to ensure we don't destroy stuff in parallel.
     std::vector<int> ret_val;
     int smallest_delta = n*n + 1;
+    int parallel_smallest_delta = smallest_delta;
     int pair, u, v, set_start_size, num_added, lidx, ridx;
     int rollback_bucket = 0;
     bool success = true;
+    bool parallel_success = true;
     last_count += 2;
     
     // Walk through each bucket in order. The initializing/incrementing
@@ -244,7 +248,6 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
 
             //If it's a normal bucket
             if (i < n*n) {
-                bool parallel_success = true;
                 int temp_i = i;
                 int num_items = 0;
                 std::list<int>::iterator listIter;
@@ -261,21 +264,20 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                         //printf("Popped item: %d\n", popped_items[num_items]);
 
                     }
-                    temp_i++;
+                    temp_i++; // one greater than last bucket
                 }
 
                 //Check everything in popped_items in parallel
-                //Lock parallel_success when modifying?
-                //#pragma omp parallel for
+                #pragma omp parallel for
                 for (int a = 0; a < num_items; a++) {
                     //printf("Parallel Check, a = %d\tnum_items = %d\n", a, num_items);
                     check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
-                             popped_items[a], last_count, &parallel_success, &smallest_delta);
+                             popped_items[a], last_count, &parallel_success, &parallel_smallest_delta);
                 }
                
                 //printf("Finished Parallel Check\n");
                 //If everything in this set of num_items was good
-                if (parallel_success && temp_i < smallest_delta) {
+                if (parallel_success && temp_i < parallel_smallest_delta) {
                     //printf("Parallel Success!\n");
                     //Add num_items to retval
                     for (int a = 0; a < num_items; a++) {
@@ -286,46 +288,75 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                     temp_i = i;
                     num_items = 0;
                     while (num_items < n_threads && temp_i < n*n) {
-                        for (int a = 0; a < bucket_heap[temp_i].size() && num_items < n_threads; a++) {
+                       
+                        //Because you have to set INITIAL size, or C++ does stupid shit
+                        int size = bucket_heap[temp_i].size();
+                        for (int a = 0; a < size && num_items < n_threads; a++) {
+                            //printf("Removed item: %d\n", bucket_heap[temp_i].front());
                             bucket_heap[temp_i].pop_front();
                             num_items++;
                         }
-                        temp_i++;
+                        temp_i++; // one greater than last bucket
                     }
                     
                     //Temp_i is one greater than the last bucket. Over estimate.
-                    rollback_bucket = max(temp_i - 1, 0); // Last bucket to have 0 or more items.
+                    rollback_bucket = max(temp_i - 3, 0); // Last bucket to have 0 or more items.
                     i = rollback_bucket;
                     last_bucket = i;
 
                 } else {
+                    //printf("Parallel Failure...\n");
 
                     for (int a = i; a < n*n; a++, last_bucket++) {
+                        //printf("Innermost loop, a = %d\n", a);
                         while (bucket_heap[a].size() > 0) {
                             if (a < n*n) {
+                                /*
+                                pair = bucket_heap[a].front();
+
+                                if ((int)ret_val.size() == 0) {
+                                    printf("Returning one because empty\n");
+                                    ret_val.push_back(pair);
+                                    bucket_heap[a].pop_front();
+                                } else {
+                                    printf("Returning what we had\n");
+                                    last_bucket = rollback_bucket;
+                                }
+                                return ret_val;
+                                */
+                                    
+                                //printf("Success before: %s\n", success ? "True" : "False");
                                 pair = bucket_heap[a].front();
                                 check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
                                         pair, last_count, &success, &smallest_delta);
+                                //printf("Success after : %s\n", success ? "True" : "False");
 
                                 if (a > smallest_delta || !success) {
-
+                                    
+                                    //printf("Serial Failiure. SmallestDelta = %d\n", smallest_delta);
                                     if ((int)ret_val.size() == 0) {
+                                        //printf("ret_val.size() == 0\n");
                                         ret_val.push_back(pair);
                                         bucket_heap[a].pop_front();
                                     } else {
+                                        //printf("Setting back bucket\n");
                                         last_bucket = rollback_bucket;
                                     }
 
+                                    //last_bucket = 0;
                                     return ret_val;
                                 }
-                                
+                               
+                                //printf("Failed, returning: %d\n", pair);
                                 ret_val.push_back(pair);
                                 bucket_heap[a].pop_front();
                                 rollback_bucket = a;
+                            
                             }
                         }
                     }
-
+                    
+                    //last_bucket = 0;
                     return ret_val;
                 }
 
