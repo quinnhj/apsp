@@ -15,6 +15,7 @@ const float INF = 100000.0;
 float min_edge = 1.0;
 int last_bucket = 0;
 int last_count = 1;
+int round_count = 0;
 omp_lock_t* heap_locks;
 omp_lock_t success_lock;
 omp_lock_t delta_lock;
@@ -156,7 +157,7 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
                 // the minimum edge value.
                 return -1;
             }
-        }
+        } 
     }
 
     // Return -1 if the heap is empty
@@ -164,16 +165,31 @@ int heap_extract(std::list<int>* bucket_heap, int* b_num, int n,
 }
 
 
-bool incr_check (int* arr, bool* success, int val, int pos, bool write) {
+bool incr_check (int* arr, bool* success, int val, int pos, bool write, bool revisit) {
     
-    int newval = write ? val : val + 1;
+    int checkval = write ? val : val + 1;
+    int newval = write ? val + 1 : val;
+    newval += round_count;
     bool temp;
-
+    bool temp_failure;
+    bool valid;
     omp_set_lock(&success_lock);
-    if (arr[pos] >= newval || !*success) {
+   
+    if (!revisit) {
+        valid = true;
+    } else {
+        if (arr[pos] == val + round_count - 1 || arr[pos] == val + round_count - 2) {
+            valid = false;
+        } else {
+            valid = true;
+        }
+    }
+
+    temp_failure = write ? (arr[pos] >= val || !*success) : ((arr[pos] >= val && arr[pos] % 2 == 0) || !*success);
+    if (temp_failure && valid) {
         temp = false;
     } else {
-        arr[pos] = val;
+        arr[pos] = newval;
         temp = true;
     }
 
@@ -186,7 +202,7 @@ bool incr_check (int* arr, bool* success, int val, int pos, bool write) {
 bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
         std::list<int>::iterator* iters,
         float* dist, int* p, int* q, std::vector<int>* L, std::vector<int>* R,
-        int pair, int last_count, bool* success, int* smallest_delta) {
+        int pair, int last_count, bool* success, int* smallest_delta, bool revisit) {
 
     int u = pair/n;
     int v = pair%n;
@@ -196,14 +212,14 @@ bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
     int my_smallest_delta = *smallest_delta;
     omp_unset_lock(&delta_lock);
     
-    incr_check(distcount, success, last_count, pair, false);
-    incr_check(pcount, success, last_count, pair, false);
-    incr_check(qcount, success, last_count, pair, false);
+    incr_check(distcount, success, last_count, pair, false, revisit);
+    incr_check(pcount, success, last_count, pair, false, revisit);
+    incr_check(qcount, success, last_count, pair, false, revisit);
     
-    incr_check(Lcount, success, last_count, lidx, false);
-    incr_check(Lcount, success, last_count, p[pair]*n + v, true);
-    incr_check(Rcount, success, last_count, ridx, false);
-    incr_check(Rcount, success, last_count, u*n + q[pair], true);
+    incr_check(Lcount, success, last_count, lidx, false, revisit);
+    incr_check(Lcount, success, last_count, p[pair]*n + v, true, revisit);
+    incr_check(Rcount, success, last_count, ridx, false, revisit);
+    incr_check(Rcount, success, last_count, u*n + q[pair], true, revisit);
    
     int lsize = (int)L[lidx].size();
     int rsize = (int)R[ridx].size();
@@ -212,21 +228,21 @@ bool check_overlap (std::list<int>* bucket_heap, int* b_num, int n,
     for (int j = 0; j < lsize; j++) {
         val = dist[pair] + dist[L[lidx][j]*n + u];
         my_smallest_delta = min((int)(val/min_edge), my_smallest_delta);
-        incr_check(distcount, success, last_count, L[lidx][j]*n + u, false);
-        incr_check(distcount, success, last_count, L[lidx][j]*n + v, true);
-        incr_check(pcount, success, last_count, L[lidx][j]*n + v, true);
-        incr_check(pcount, success, last_count, L[lidx][j]*n + u, false);
-        incr_check(qcount, success, last_count, L[lidx][j]*n + v, true);
+        incr_check(distcount, success, last_count, L[lidx][j]*n + u, false, revisit);
+        incr_check(distcount, success, last_count, L[lidx][j]*n + v, true, revisit);
+        incr_check(pcount, success, last_count, L[lidx][j]*n + v, true, revisit);
+        incr_check(pcount, success, last_count, L[lidx][j]*n + u, false, revisit);
+        incr_check(qcount, success, last_count, L[lidx][j]*n + v, true, revisit);
     }
    
     for (int j = 0; j < rsize; j++) {
         val = dist[pair] + dist[v*n +  R[ridx][j]];
         my_smallest_delta = min((int)(val/min_edge), my_smallest_delta);
-        incr_check(distcount, success, last_count, v*n + R[ridx][j], false);
-        incr_check(distcount, success, last_count, u*n + R[ridx][j], true);
-        incr_check(pcount, success, last_count, u*n + R[ridx][j], true);
-        incr_check(qcount, success, last_count, u*n + R[ridx][j], true);
-        incr_check(qcount, success, last_count, v*n + R[ridx][j], false);
+        incr_check(distcount, success, last_count, v*n + R[ridx][j], false, revisit);
+        incr_check(distcount, success, last_count, u*n + R[ridx][j], true, revisit);
+        incr_check(pcount, success, last_count, u*n + R[ridx][j], true, revisit);
+        incr_check(qcount, success, last_count, u*n + R[ridx][j], true, revisit);
+        incr_check(qcount, success, last_count, v*n + R[ridx][j], false, revisit);
     }
     
     omp_set_lock(&delta_lock);
@@ -255,11 +271,14 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     bool success = true;
     bool parallel_success = true;
     last_count += 2;
-    
+    round_count = 0;
+    //bool prnt = false;
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
     for (int i = last_bucket; i < n*n + 1; i++, last_bucket++) {
-        
+        //prnt = (i > 6600 && i < 6620);
+        //if (prnt) printf("Starting New Chunk\n");
+
         while (bucket_heap[i].size() > 0) {
 
             //If it's a normal bucket
@@ -268,6 +287,7 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 int num_items = 0;
                 std::list<int>::iterator listIter;
                 smallest_delta = parallel_smallest_delta;
+                round_count += 2;
                 
                 //Populate popped_items with the next < n_threads items
                 while (num_items < par_size && temp_i < n*n) {
@@ -284,12 +304,13 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 #pragma omp parallel for
                 for (int a = 0; a < num_items; a++) {
                     check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
-                             popped_items[a], last_count, &parallel_success, &parallel_smallest_delta);
+                             popped_items[a], last_count, &parallel_success, &parallel_smallest_delta, false);
                 }
-               
+
                 //If everything in this set of num_items was good
                 if (parallel_success && temp_i < parallel_smallest_delta) {
                     //Add num_items to retval
+                    //if (prnt) printf("Parallel Success\ttot = %d\n", round_count + last_count);
                     for (int a = 0; a < num_items; a++) {
                         ret_val.push_back(popped_items[a]);
                     }
@@ -311,13 +332,21 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                     last_bucket = i;
 
                 } else {
+                    round_count += 2;
+                    //if (prnt) printf("Revisiting\n");
                     for (int a = i; a < n*n; a++, last_bucket++) {
                         while (bucket_heap[a].size() > 0) {
                             if (a < n*n) {
                                 
                                 pair = bucket_heap[a].front();
                                 check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
-                                        pair, last_count, &success, &smallest_delta);
+                                        pair, last_count, &success, &smallest_delta, true);
+                                
+                                /*
+                                if (prnt) printf("a = %d\tdelta = %d\tsuccess = %d\tsize = %d\tround = %d\ttot = %d\n",
+                                        a, smallest_delta, success ? 1 : 0, (int)bucket_heap[a].size(),
+                                        round_count, round_count + last_count);
+                                */
 
                                 if (a > smallest_delta || !success) {
                                     if ((int)ret_val.size() == 0) {
@@ -326,15 +355,18 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                                     } else {
                                         last_bucket = rollback_bucket;
                                     }
+                                    last_count += round_count;
                                     return ret_val;
                                 }
-                               
+                              
+                                //printf("Didn't fail first time!\n");
                                 ret_val.push_back(pair);
                                 bucket_heap[a].pop_front();
                                 rollback_bucket = a;
                             }
                         }
                     }
+                    last_count += round_count;
                     return ret_val;
                 }
 
@@ -343,6 +375,7 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 // This should be implemented using a fib heap as per the paper.
                 // For now enforcing that this scenario can't happen by limiting
                 // the minimum edge value.
+                last_count += round_count;
                 return ret_val;
             }
         }
@@ -534,7 +567,7 @@ int main( int argc, char **argv )
     int n = read_int( argc, argv, "-n", 100 );
     n_threads = read_int( argc, argv, "-t", 1);
     omp_set_num_threads(n_threads);
-    par_size = n_threads*4;
+    par_size = n_threads*1;
     printf("Running with %d threads.\n", n_threads);
     
     heap_locks = (omp_lock_t*) malloc(NUM_LOCKS * sizeof(omp_lock_t));
