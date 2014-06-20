@@ -19,6 +19,7 @@ omp_lock_t* heap_locks;
 omp_lock_t success_lock;
 omp_lock_t delta_lock;
 int n_threads = 1;
+int par_size = 1; //Size of par set during parallel set selection
 
 int* pcount;
 int* qcount;
@@ -68,12 +69,7 @@ void floyd_warshall(int n, int* par, float* dist) {
 
 }
 
-/*
- * Inserts into our bucket based heap.
- * It doesn't maintain a true heap, but a coarsely grained heap with
- * buckets of size 1/n*n. 
- */
-void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
+void heap_insert_helper(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
         std::list<int>::iterator* iters) {
     
     // Figure out which bucket to insert into
@@ -85,15 +81,31 @@ void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, i
     }
 
     // Add to bucket
-    omp_set_lock(heap_locks + (idx % NUM_LOCKS));
     bucket_heap[idx].push_back(pair);
     std::list<int>::iterator iter = bucket_heap[idx].end();
-    omp_unset_lock(heap_locks + (idx % NUM_LOCKS));
     
     // Update bookkeeping so that we can decrement this in constant time.
     b_num[pair] = idx; // array storing bucket numbers
     iter--;
     iters[pair] = iter; // pointer to position in said bucket
+}
+
+/*
+ * Inserts into our bucket based heap.
+ * It doesn't maintain a true heap, but a coarsely grained heap with
+ * buckets of size 1/n*n. 
+ */
+void heap_insert(std::list<int>* bucket_heap, int* b_num, int pair, float val, int n,
+        std::list<int>::iterator* iters) {
+
+    int idx = (int)(val/min_edge);
+    idx = min(idx, n*n);
+    
+    //omp_set_lock(heap_locks + (idx % NUM_LOCKS));
+    omp_set_lock(heap_locks);
+    heap_insert_helper(bucket_heap, b_num, pair, val, n, iters);    
+    omp_unset_lock(heap_locks);
+    //omp_unset_lock(heap_locks + (idx % NUM_LOCKS));
 }
 
 /*
@@ -105,12 +117,15 @@ void heap_decrease(std::list<int>* bucket_heap, int* b_num, int pair, float val,
         std::list<int>::iterator* iters) {
     
     // Deleting 'pair' from its bucket.
-    omp_set_lock(heap_locks + (b_num[pair] % NUM_LOCKS));
+    omp_set_lock(heap_locks);
+    //omp_set_lock(heap_locks + (b_num[pair] % NUM_LOCKS));
+    int idx1 = b_num[pair];
     bucket_heap[b_num[pair]].erase(iters[pair]);
-    omp_unset_lock(heap_locks + (b_num[pair] % NUM_LOCKS));
     
     // Inserting it into heap with a new value.
-    heap_insert(bucket_heap, b_num, pair, val, n, iters);
+    heap_insert_helper(bucket_heap, b_num, pair, val, n, iters);
+    omp_unset_lock(heap_locks);
+    //omp_unset_lock(heap_locks + (idx1 % NUM_LOCKS));
 }
 
 /*
@@ -244,6 +259,7 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
     // Walk through each bucket in order. The initializing/incrementing
     // with last_bucket ensures that we only ever see each index once.
     for (int i = last_bucket; i < n*n + 1; i++, last_bucket++) {
+        
         while (bucket_heap[i].size() > 0) {
 
             //If it's a normal bucket
@@ -251,18 +267,15 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 int temp_i = i;
                 int num_items = 0;
                 std::list<int>::iterator listIter;
+                smallest_delta = parallel_smallest_delta;
                 
                 //Populate popped_items with the next < n_threads items
-                while (num_items < n_threads && temp_i < n*n) {
-                    //printf("List size: %d\n", (int)bucket_heap[temp_i].size());
+                while (num_items < par_size && temp_i < n*n) {
                     for(listIter = bucket_heap[temp_i].begin(); 
-                            listIter != bucket_heap[temp_i].end() && num_items < n_threads;
+                            listIter != bucket_heap[temp_i].end() && num_items < par_size;
                             listIter++, num_items++) {
 
-                        //printf("Adding to popped items, num_items = %d\n", num_items);
                         popped_items[num_items] = *listIter;
-                        //printf("Popped item: %d\n", popped_items[num_items]);
-
                     }
                     temp_i++; // one greater than last bucket
                 }
@@ -270,15 +283,12 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                 //Check everything in popped_items in parallel
                 #pragma omp parallel for
                 for (int a = 0; a < num_items; a++) {
-                    //printf("Parallel Check, a = %d\tnum_items = %d\n", a, num_items);
                     check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
                              popped_items[a], last_count, &parallel_success, &parallel_smallest_delta);
                 }
                
-                //printf("Finished Parallel Check\n");
                 //If everything in this set of num_items was good
                 if (parallel_success && temp_i < parallel_smallest_delta) {
-                    //printf("Parallel Success!\n");
                     //Add num_items to retval
                     for (int a = 0; a < num_items; a++) {
                         ret_val.push_back(popped_items[a]);
@@ -287,76 +297,44 @@ std::vector<int> heap_extract_multiple(std::list<int>* bucket_heap, int* b_num, 
                     //Pop num_items from lists.
                     temp_i = i;
                     num_items = 0;
-                    while (num_items < n_threads && temp_i < n*n) {
-                       
-                        //Because you have to set INITIAL size, or C++ does stupid shit
+                    while (num_items < par_size && temp_i < n*n) {
                         int size = bucket_heap[temp_i].size();
-                        for (int a = 0; a < size && num_items < n_threads; a++) {
-                            //printf("Removed item: %d\n", bucket_heap[temp_i].front());
+                        for (int a = 0; a < size && num_items < par_size; a++) {
                             bucket_heap[temp_i].pop_front();
                             num_items++;
                         }
                         temp_i++; // one greater than last bucket
                     }
                     
-                    //Temp_i is one greater than the last bucket. Over estimate.
-                    rollback_bucket = max(temp_i - 3, 0); // Last bucket to have 0 or more items.
+                    rollback_bucket = max(temp_i - 1, 0); // Last bucket to have 0 or more items.
                     i = rollback_bucket;
                     last_bucket = i;
 
                 } else {
-                    //printf("Parallel Failure...\n");
-
                     for (int a = i; a < n*n; a++, last_bucket++) {
-                        //printf("Innermost loop, a = %d\n", a);
                         while (bucket_heap[a].size() > 0) {
                             if (a < n*n) {
-                                /*
-                                pair = bucket_heap[a].front();
-
-                                if ((int)ret_val.size() == 0) {
-                                    printf("Returning one because empty\n");
-                                    ret_val.push_back(pair);
-                                    bucket_heap[a].pop_front();
-                                } else {
-                                    printf("Returning what we had\n");
-                                    last_bucket = rollback_bucket;
-                                }
-                                return ret_val;
-                                */
-                                    
-                                //printf("Success before: %s\n", success ? "True" : "False");
+                                
                                 pair = bucket_heap[a].front();
                                 check_overlap (bucket_heap, b_num, n, iters, dist, p, q, L, R,
                                         pair, last_count, &success, &smallest_delta);
-                                //printf("Success after : %s\n", success ? "True" : "False");
 
                                 if (a > smallest_delta || !success) {
-                                    
-                                    //printf("Serial Failiure. SmallestDelta = %d\n", smallest_delta);
                                     if ((int)ret_val.size() == 0) {
-                                        //printf("ret_val.size() == 0\n");
                                         ret_val.push_back(pair);
                                         bucket_heap[a].pop_front();
                                     } else {
-                                        //printf("Setting back bucket\n");
                                         last_bucket = rollback_bucket;
                                     }
-
-                                    //last_bucket = 0;
                                     return ret_val;
                                 }
                                
-                                //printf("Failed, returning: %d\n", pair);
                                 ret_val.push_back(pair);
                                 bucket_heap[a].pop_front();
                                 rollback_bucket = a;
-                            
                             }
                         }
                     }
-                    
-                    //last_bucket = 0;
                     return ret_val;
                 }
 
@@ -556,6 +534,7 @@ int main( int argc, char **argv )
     int n = read_int( argc, argv, "-n", 100 );
     n_threads = read_int( argc, argv, "-t", 1);
     omp_set_num_threads(n_threads);
+    par_size = n_threads*4;
     printf("Running with %d threads.\n", n_threads);
     
     heap_locks = (omp_lock_t*) malloc(NUM_LOCKS * sizeof(omp_lock_t));
@@ -617,7 +596,7 @@ int main( int argc, char **argv )
     Lcount = (int*) malloc(n*n*sizeof(int));
     Rcount = (int*) malloc(n*n*sizeof(int));
     distcount = (int*) malloc(n*n*sizeof(int));
-    popped_items = (int*) malloc(n_threads*sizeof(int));
+    popped_items = (int*) malloc(par_size*sizeof(int));
 
  
     /*

@@ -4,7 +4,7 @@
 # Boost library install as an environment variable, otherwise it won't compile.
 #
 
-CC = g++-4.9
+CC = g++
 OPENMP = -fopenmp
 #OPENMP =
 CFLAGS = -O3
